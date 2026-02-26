@@ -21,11 +21,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     # App-level API routes
-    path('api/', include('api.urls')),
-    path('api/users/', include('users.urls')),
-    path('api/reports/', include('reports.urls')),
-    path('api/analysis/', include('analysis.urls')),
-    path('api/risk/', include('risk.urls')),
-    path('api/safety/', include('safety.urls')),
+   
 ]
 
