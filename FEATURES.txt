@@ -1,0 +1,39 @@
+Context-Aware AI Health Trajectory Interpreter
+===============================================
+Project Setup — Features Added
+Date: 2026-02-26
+
+BACKEND (Django REST Framework)
+--------------------------------
+1. Django project structure at /backend/
+2. Django apps created:
+   - users      → /api/users/
+   - reports    → /api/reports/
+   - analysis   → /api/analysis/
+   - risk       → /api/risk/
+   - safety     → /api/safety/
+   - api        → /api/
+
+3. REST Framework configured (JSONRenderer + JSONParser)
+4. CORS support added (django-cors-headers)
+   - Allows React dev server: http://localhost:5173
+5. All apps registered in INSTALLED_APPS
+6. Base URL routing set up for all apps in backend/urls.py
+7. Skeleton urls.py added to every app (ready for future endpoints)
+8. Existing endpoint: POST /api/simplify-report/
+   - Input:  { "report": "text" }
+   - Output: { "status": "success", "data": { "simplified_explanation": "..." } }
+
+FRONTEND (Planned — React + Vite)
+-----------------------------------
+- React app to be scaffolded at /frontend/
+- Folder structure planned:
+   src/pages/        → Page-level components
+   src/components/   → Reusable UI components
+   src/services/     → API service layer (axios)
+- React Router for base navigation
+
+DEPENDENCIES INSTALLED
+-----------------------
+- djangorestframework
+- django-cors-headers
