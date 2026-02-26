@@ -1,0 +1,54 @@
+App: users
+Project: Context-Aware AI Health Trajectory Interpreter
+========================================================
+
+PURPOSE
+-------
+Handles all user identity, authentication, authorization,
+and profile management for patients, doctors, and admins.
+
+FEATURES TO IMPLEMENT
+----------------------
+
+1. USER REGISTRATION & AUTH
+   - POST /api/users/register/        → Register new user (patient/doctor)
+   - POST /api/users/login/           → Login, return JWT access + refresh token
+   - POST /api/users/logout/          → Invalidate token
+   - POST /api/users/token/refresh/   → Refresh JWT access token
+
+2. USER ROLES
+   - Role types: patient, doctor, admin
+   - Role-based access control (RBAC) on all protected endpoints
+   - Doctors can view patient reports; patients can only view their own
+
+3. USER PROFILE
+   - GET  /api/users/profile/         → Get current user's profile
+   - PUT  /api/users/profile/         → Update profile (name, DOB, contact)
+   - Fields: full_name, email, phone, date_of_birth, gender, role
+
+4. PATIENT-SPECIFIC PROFILE
+   - Fields: blood_group, allergies, chronic_conditions, emergency_contact
+   - GET /api/users/patient/<id>/     → Doctor fetches specific patient profile
+
+5. DOCTOR-SPECIFIC PROFILE
+   - Fields: specialization, license_number, hospital_affiliation
+   - GET /api/users/doctor/<id>/      → Patient fetches assigned doctor info
+
+6. CHANGE PASSWORD
+   - POST /api/users/change-password/ → Validate old password, set new one
+
+7. MODELS
+   - CustomUser (extends AbstractUser)
+     Fields: role, phone, date_of_birth, gender
+   - PatientProfile (OneToOne → CustomUser)
+   - DoctorProfile  (OneToOne → CustomUser)
+
+DEPENDENCIES
+-------------
+- djangorestframework-simplejwt  (JWT auth)
+- Pillow                         (profile picture upload, optional)
+
+NOTES
+------
+- All endpoints except register/login require JWT authentication
+- Use IsAuthenticated + custom role permission classes

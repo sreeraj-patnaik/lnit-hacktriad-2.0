@@ -1,0 +1,79 @@
+App: api
+Project: Context-Aware AI Health Trajectory Interpreter
+========================================================
+
+PURPOSE
+-------
+Main API gateway app. Houses cross-cutting endpoints that
+orchestrate multiple apps, external AI integrations, and
+utility endpoints used by the React frontend.
+
+FEATURES TO IMPLEMENT
+----------------------
+
+1. SIMPLIFY REPORT (EXISTING)
+   - POST /api/simplify-report/
+     Input:  { "report": "raw medical text" }
+     Output: { "status": "success", "data": { "simplified_explanation": "..." } }
+   - Calls LLM to convert medical jargon to plain-English
+
+2. FULL PIPELINE ENDPOINT
+   - POST /api/process-report/
+     Input:  { "report_id": <id> }
+     → Orchestrates: Analysis → Risk Scoring → Safety Check
+     → Returns combined result in one response
+     Output: {
+         "analysis": { ... },
+         "risk": { "score": 72, "level": "HIGH" },
+         "alerts": [ ... ]
+     }
+
+3. PATIENT DASHBOARD SUMMARY
+   - GET /api/dashboard/
+     → Returns a consolidated summary for the logged-in patient:
+       - Total reports uploaded
+       - Latest risk score and level
+       - Active safety alerts count
+       - Last report date
+       - Health trend (IMPROVING / STABLE / WORSENING)
+
+4. DOCTOR DASHBOARD SUMMARY
+   - GET /api/doctor/dashboard/
+     → Returns summary for the logged-in doctor:
+       - List of assigned patients
+       - Patients with CRITICAL/HIGH risk
+       - Unresolved safety alerts count
+       - Recent report activity
+
+5. SEARCH
+   - GET /api/search/?q=<query>
+     → Search across reports, patients (doctor only), and alerts
+     → Returns categorized results
+
+6. HEALTH CHECK
+   - GET /api/health/
+     → Simple server health check endpoint
+     Output: { "status": "ok", "timestamp": "..." }
+   - Used by frontend to confirm backend is reachable
+
+7. AI CHAT / Q&A (ADVANCED)
+   - POST /api/chat/
+     Input:  { "message": "What does my HbA1c result mean?", "patient_id": <id> }
+     Output: { "reply": "Your HbA1c of 8.2 means..." }
+   - Context-aware: injects patient report data into the LLM prompt
+
+8. EXPORT
+   - GET /api/export/report/<id>/     → Export analysis as PDF summary
+   - GET /api/export/patient/<id>/    → Export full patient health history as PDF
+
+DEPENDENCIES
+------------
+- google-generativeai     (Gemini LLM calls)
+- reportlab / weasyprint  (PDF generation for export)
+
+NOTES
+------
+- /api/process-report/ should be idempotent — safe to retry
+- /api/health/ must NOT require authentication
+- All other endpoints require JWT authentication
+- Rate-limit AI endpoints to avoid excessive API usage
