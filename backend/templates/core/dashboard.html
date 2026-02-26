@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Dashboard</h2>
+<p><strong>User:</strong> {{ request.user.username }}</p>
+<p><strong>Profile age:</strong> {{ profile.age|default:"Not set" }}</p>
+
+<a href="{% url 'report-upload' %}" role="button">Upload New Report</a>
+
+<h3>Your Previous Scans</h3>
+{% if reports %}
+    <table>
+        <thead>
+        <tr>
+            <th>Date</th>
+            <th>File</th>
+            <th>Analysis</th>
+            <th>Action</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for report in reports %}
+            <tr>
+                <td>{{ report.report_date }}</td>
+                <td>
+                    {% if report.report_file %}
+                        <a href="{{ report.report_file.url }}" target="_blank">Open</a>
+                    {% else %}
+                        Text input
+                    {% endif %}
+                </td>
+                <td>{% if report.analysis_completed %}Completed{% else %}Pending{% endif %}</td>
+                <td><a href="{% url 'report-detail' report.id %}">View</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No reports yet.</p>
+{% endif %}
+{% endblock %}

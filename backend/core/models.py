@@ -12,7 +12,6 @@ class UserProfile(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE)
 
-    # Basic info
     age = models.IntegerField(null=True, blank=True)
     gender = models.CharField(max_length=20, blank=True)
     city = models.CharField(max_length=100, blank=True)
@@ -28,10 +27,9 @@ class UserProfile(models.Model):
     activity_level = models.CharField(max_length=50, blank=True)
     diet_type = models.CharField(max_length=100, blank=True)
 
-    # Context
+    
     occupation = models.CharField(max_length=150, blank=True)
 
-    # Medical background
     past_medical_conditions = models.TextField(blank=True)
     current_symptoms = models.TextField(blank=True)
     medications = models.TextField(blank=True)
