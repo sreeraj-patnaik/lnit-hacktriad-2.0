@@ -1,0 +1,49 @@
+App: reports
+Project: Context-Aware AI Health Trajectory Interpreter
+========================================================
+
+PURPOSE
+-------
+Handles upload, storage, retrieval, and management of
+patient medical reports (lab results, prescriptions, imaging).
+
+FEATURES TO IMPLEMENT
+----------------------
+
+1. REPORT UPLOAD
+   - POST /api/reports/upload/         → Upload a medical report (PDF/text/image)
+   - Fields: patient, report_type, file, description, date_of_report
+   - Report types: LAB_RESULT, PRESCRIPTION, IMAGING, DISCHARGE_SUMMARY, OTHER
+
+2. REPORT LISTING
+   - GET /api/reports/                 → List all reports for logged-in patient
+   - GET /api/reports/?patient=<id>    → Doctor fetches reports for a patient
+   - Filters: report_type, date range, status
+
+3. REPORT DETAIL
+   - GET  /api/reports/<id>/           → Retrieve single report details
+   - PUT  /api/reports/<id>/           → Update report metadata
+   - DELETE /api/reports/<id>/         → Delete a report (patient/admin only)
+
+4. REPORT STATUS TRACKING
+   - Status flow: UPLOADED → PROCESSING → ANALYZED → REVIEWED
+   - GET /api/reports/<id>/status/     → Check current processing status
+
+5. REPORT SIMPLIFICATION
+   - POST /api/reports/<id>/simplify/  → Trigger AI simplification for this report
+   - Calls the ai/simplify logic and stores result back to report
+
+6. REPORT HISTORY / TIMELINE
+   - GET /api/reports/timeline/        → All patient reports sorted chronologically
+   - Useful for health trajectory tracking
+
+7. MODELS
+   - Report
+     Fields: patient (FK → CustomUser), report_type, file, description,
+             date_of_report, uploaded_at, status, simplified_text, analyzed
+
+NOTES
+------
+- File storage: Django media files (local dev), configurable for cloud (S3)
+- Restrict report access: patient sees own reports; doctor sees assigned patient reports
+- Validate file size and type on upload
