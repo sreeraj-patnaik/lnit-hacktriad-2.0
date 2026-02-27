@@ -1,10 +1,24 @@
 {% extends "base.html" %}
+{% block title %}Login | Aarogya Health Command{% endblock %}
 {% block content %}
-<h2>Login</h2>
-<form method="post">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Login</button>
-</form>
-<p>New here? <a href="{% url 'signup' %}">Create account</a></p>
+<section class="panel auth-panel">
+    <div class="panel-head">
+        <h1>Sign In</h1>
+        <p>Access your reports, profile context, and trend analysis dashboard.</p>
+    </div>
+    <form method="post" class="app-form">
+        {% csrf_token %}
+        {% for field in form %}
+            <div class="form-field {% if field.errors %}error{% endif %}">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% for error in field.errors %}
+                    <small class="field-error">{{ error }}</small>
+                {% endfor %}
+            </div>
+        {% endfor %}
+        <button type="submit" class="btn-primary">Login</button>
+    </form>
+    <p class="auth-switch">New here? <a href="{% url 'signup' %}">Create account</a></p>
+</section>
 {% endblock %}

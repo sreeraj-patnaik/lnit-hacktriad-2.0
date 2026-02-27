@@ -1,43 +1,48 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Health Trajectory MVP</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <link rel="stylesheet" href="/static/app.css">
+    <title>{% block title %}AI Report analyser & Health Trajectory Interpreter{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'app.css' %}">
 </head>
-<body>
-<main class="container">
-    <nav>
-        <ul>
-            <li><strong>Health Trajectory MVP</strong></li>
-        </ul>
-        <ul>
+<body class="{% block page_class %}{% endblock %}">
+<div class="app-shell">
+    <header class="topbar">
+        <div class="brand-wrap">
+            <a class="brand-mark" href="{% url 'dashboard' %}">AH</a>
+            <div>
+                <p class="brand-title">AI Report analyser & Health Trajectory Interpreter</p>
+                <p class="brand-subtitle">Longitudinal Lab Intelligence</p>
+            </div>
+        </div>
+        <nav class="top-nav">
             {% if request.user.is_authenticated %}
-                <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
-                <li><a href="{% url 'profile' %}">Profile</a></li>
-                <li><a href="{% url 'report-upload' %}">Upload Report</a></li>
-                <li>
-                    <form method="post" action="{% url 'logout' %}" style="margin:0;">
-                        {% csrf_token %}
-                        <button type="submit" class="secondary">Logout</button>
-                    </form>
-                </li>
+                <a href="{% url 'dashboard' %}">Dashboard</a>
+                <a href="{% url 'profile' %}">Profile</a>
+                <a href="{% url 'report-upload' %}">Upload Scan</a>
+                <form method="post" action="{% url 'logout' %}" class="logout-form">
+                    {% csrf_token %}
+                    <button type="submit">Logout</button>
+                </form>
             {% else %}
-                <li><a href="{% url 'login' %}">Login</a></li>
-                <li><a href="{% url 'signup' %}">Sign Up</a></li>
+                <a href="{% url 'login' %}">Login</a>
+                <a href="{% url 'signup' %}">Sign Up</a>
             {% endif %}
-        </ul>
-    </nav>
+        </nav>
+    </header>
 
-    {% if messages %}
-        {% for message in messages %}
-            <article class="message {{ message.tags }}">{{ message }}</article>
-        {% endfor %}
-    {% endif %}
-
-    {% block content %}{% endblock %}
-</main>
+    <main class="page-wrap">
+        {% if messages %}
+            <section class="messages">
+                {% for message in messages %}
+                    <article class="message {{ message.tags }}">{{ message }}</article>
+                {% endfor %}
+            </section>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+</div>
 </body>
 </html>
