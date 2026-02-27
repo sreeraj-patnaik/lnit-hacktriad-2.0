@@ -8,6 +8,7 @@ class MedicalReport(models.Model):
     report_date = models.DateField()
     analysis_completed = models.BooleanField(default=False)
     ocr_text = models.TextField(blank=True)
+    doctor_suggestions = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

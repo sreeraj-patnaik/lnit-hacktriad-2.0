@@ -41,13 +41,18 @@ class HealthFlowTests(TestCase):
             reverse("report-upload"),
             {
                 "report_date": "2026-02-22",
-                "ocr_text": "Hemoglobin 12.8 g/dL 12-16\nWBC 6500 cells/uL 4000-11000",
+                "ocr_text": (
+                    "Hemoglobin 12.8 g/dL 12-16\n"
+                    "WBC 6500 cells/uL 4000-11000\n"
+                    "Doctor advice: repeat CBC after 2 weeks and keep hydration adequate."
+                ),
             },
         )
         self.assertEqual(response.status_code, 302)
         report = MedicalReport.objects.filter(user=self.user1).latest("id")
         self.assertFalse(bool(report.report_file))
         self.assertTrue(report.parameters.exists())
+        self.assertTrue(report.doctor_suggestions)
 
     def test_image_upload_still_analyzes_with_fallback(self):
         self.client.login(username="u1", password="pass12345")
@@ -61,3 +66,24 @@ class HealthFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         report = MedicalReport.objects.filter(user=self.user1).latest("id")
         self.assertTrue(AnalysisResult.objects.filter(report=report, user=self.user1).exists())
+
+    def test_report_detail_shows_graphical_trends(self):
+        self.client.login(username="u1", password="pass12345")
+        self.client.post(
+            reverse("report-upload"),
+            {
+                "report_date": "2026-02-24",
+                "ocr_text": "Hemoglobin 11.5 g/dL 12-16",
+            },
+        )
+        self.client.post(
+            reverse("report-upload"),
+            {
+                "report_date": "2026-02-25",
+                "ocr_text": "Hemoglobin 12.2 g/dL 12-16",
+            },
+        )
+        report = MedicalReport.objects.filter(user=self.user1).latest("id")
+        response = self.client.get(reverse("report-detail", args=[report.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Graphical Trend Analysis")

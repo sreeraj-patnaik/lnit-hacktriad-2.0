@@ -14,7 +14,7 @@ from .models import AnalysisResult, LabParameter, MedicalReport
 
 def process_report(report_id: int) -> AnalysisResult:
     report = MedicalReport.objects.select_related("user").get(id=report_id)
-    extracted_data = run_ocr(report)
+    extracted_data, doctor_suggestions = run_ocr(report)
 
     with transaction.atomic():
         report.parameters.all().delete()
@@ -28,6 +28,8 @@ def process_report(report_id: int) -> AnalysisResult:
                 ref_max=item.get("ref_max"),
                 risk_flag=classify(item["value"], item.get("ref_min"), item.get("ref_max")),
             )
+        report.doctor_suggestions = doctor_suggestions
+        report.save(update_fields=["doctor_suggestions"])
 
         context = prepare_llm_context(report)
         result = generate_analysis(context)
@@ -50,7 +52,7 @@ def process_report(report_id: int) -> AnalysisResult:
 
 def prepare_llm_context(report: MedicalReport) -> dict:
     user = report.user
-    profile = UserProfile.objects.get(user=user)
+    profile, _ = UserProfile.objects.get_or_create(user=user)
     reports = (
         MedicalReport.objects.filter(user=user)
         .order_by("report_date", "created_at")
@@ -59,6 +61,7 @@ def prepare_llm_context(report: MedicalReport) -> dict:
 
     reports_data = []
     for report_item in reports:
+        raw_text = (report_item.ocr_text or "").strip()
         params = [
             {
                 "name": p.name,
@@ -76,6 +79,9 @@ def prepare_llm_context(report: MedicalReport) -> dict:
                 "date": str(report_item.report_date),
                 "parameter_count": len(params),
                 "parameters": params,
+                "report_text_excerpt": raw_text[:3000],
+                "doctor_notes_or_comments": report_item.doctor_suggestions
+                or _extract_report_notes(raw_text),
             }
         )
 
@@ -101,6 +107,8 @@ def prepare_llm_context(report: MedicalReport) -> dict:
             },
         },
         "reports": reports_data,
+        "current_report_doctor_suggestions": report.doctor_suggestions
+        or _extract_report_notes((report.ocr_text or "").strip()),
     }
 
 
@@ -111,20 +119,28 @@ def generate_analysis(context: dict) -> dict:
 
     model = getattr(settings, "GROQ_MODEL", "llama-3.1-8b-instant")
     prompt = f"""
-You are a safety-first health trajectory interpreter.
+You are a safety-first family-doctor style health report explainer.
 
-Rules:
-- Explain only from the provided data.
-- No diagnosis and no medication advice.
-- Use calm, actionable, non-alarming language.
-- Mention trends, borderline concerns, and changes over time.
-- Produce practical lifestyle guidance only.
+Audience and tone:
+- Speak directly to the person in plain language, with empathy and clarity.
+- Sound like a thoughtful family doctor, not a technical bot.
+- Be detailed and context-aware using personal profile, symptoms, lifestyle, medications, and report history.
+
+Data interpretation rules:
+- Use only provided data.
+- No diagnosis and no medication prescriptions.
+- Include all relevant details from report text, including doctor notes/comments/suggestions if present.
+- Explain what each key marker means in everyday language, why it may matter, and whether it changed over time.
+- Call out stable, improving, worsening, and borderline trends.
+- Mention where uncertainty exists (missing refs, unclear OCR, sparse history).
+- Provide practical next-step guidance and questions to discuss with a clinician.
 
 Return ONLY valid JSON with this schema:
 {{
-  "mentor_summary": "plain-language explanation",
-  "trend_analysis": "what is increasing/decreasing/stable",
-  "doctor_summary": "concise handoff summary for doctor consultation"
+  "mentor_summary": "detailed person-to-person narrative summary",
+  "trend_analysis": "detailed trend and timeline interpretation across reports",
+  "doctor_summary": "structured and concise clinical handoff including key values, trends, symptoms, and note text highlights",
+  "doctor_suggestions_considered": ["list of doctor notes/comments/suggestions considered while writing this output"]
 }}
 
 DATA:
@@ -192,47 +208,81 @@ def fallback_analysis(context: dict) -> dict:
     normal_count = len([p for p in latest_report.get("parameters", []) if p.get("risk_flag") == "normal"])
 
     trend_hint = _build_trend_hint(context)
+    user_context = context.get("user_context", {}) or {}
+    doctor_notes = latest_report.get("doctor_notes_or_comments", []) or []
+    notes_line = (
+        " I also noticed report comments/notes: "
+        + "; ".join(doctor_notes[:3])
+        + "."
+        if doctor_notes
+        else ""
+    )
     if not latest_params:
         mentor_summary = (
             "No lab parameters could be extracted from the latest upload. "
             "Please upload a clearer photo or paste report text in structured lines."
+            f"{notes_line}"
         )
     else:
+        symptoms = user_context.get("current_symptoms") or "not provided"
+        conditions = user_context.get("past_medical_conditions") or "not provided"
+        medications = user_context.get("medications") or "not provided"
+        lifestyle = user_context.get("lifestyle") or {}
+        lifestyle_line = (
+            f"Sleep: {lifestyle.get('sleep_hours') or 'NA'}h, "
+            f"Activity: {lifestyle.get('activity_level') or 'NA'}, "
+            f"Diet: {lifestyle.get('diet_type') or 'NA'}."
+        )
         mentor_summary = (
-            f"Your latest report has {normal_count} parameters in the normal range. "
-            f"High markers: {', '.join(high) if high else 'none'}. "
-            f"Low markers: {', '.join(low) if low else 'none'}. "
-            "This is an educational summary and should be validated with your doctor."
+            "I reviewed your latest report together with your profile and previous records. "
+            f"In this report, {normal_count} markers are in the normal range. "
+            f"Markers running higher than range: {', '.join(high) if high else 'none identified'}. "
+            f"Markers below range: {', '.join(low) if low else 'none identified'}. "
+            f"Your shared symptoms: {symptoms}. Past conditions: {conditions}. Current medicines: {medications}. "
+            f"Lifestyle context: {lifestyle_line}{notes_line} "
+            "Please treat this as educational guidance and confirm with your clinician."
         )
 
     return {
         "mentor_summary": mentor_summary,
         "trend_analysis": (
             f"{trend_hint} "
+            "This trend view is generated from available records and may be limited by OCR quality or missing ranges. "
             "For richer narrative insight, set GROQ_API_KEY."
         ),
         "doctor_summary": (
-            "Patient has longitudinal report history with profile context. "
-            "Please review flagged high/low parameters against symptoms and history."
+            "Longitudinal review prepared with profile context. "
+            f"Current high markers: {', '.join(high) if high else 'none'}. "
+            f"Current low markers: {', '.join(low) if low else 'none'}. "
+            f"Reported symptoms: {user_context.get('current_symptoms') or 'not provided'}. "
+            f"Past conditions: {user_context.get('past_medical_conditions') or 'not provided'}. "
+            + (
+                f"Report note highlights: {'; '.join(doctor_notes[:3])}. "
+                if doctor_notes
+                else ""
+            )
+            + "Please correlate with clinical history and examination."
         ),
+        "doctor_suggestions_considered": doctor_notes[:6],
     }
 
 
-def run_ocr(report: MedicalReport) -> list[dict]:
+def run_ocr(report: MedicalReport) -> tuple[list[dict], list[str]]:
     # MVP parser:
     # 1) Use pasted/report text if provided
     # 2) Parse uploaded .txt file if available
     manual_text = (report.ocr_text or "").strip()
     if manual_text:
         parsed = _parse_lines_to_parameters(manual_text)
+        suggestions = _extract_report_notes(manual_text)
         if parsed:
-            return parsed
+            return parsed, suggestions
         report.ocr_text = (
             "Provided text could not be parsed. "
             "Use one line per parameter like: Hemoglobin 11.2 g/dL 12-16"
         )
         report.save(update_fields=["ocr_text"])
-        return []
+        return [], suggestions
 
     if report.report_file and report.report_file.name.lower().endswith(".txt"):
         try:
@@ -242,27 +292,28 @@ def run_ocr(report: MedicalReport) -> list[dict]:
                 report.ocr_text = file_text[:10000]
                 report.save(update_fields=["ocr_text"])
             parsed = _parse_lines_to_parameters(file_text)
+            suggestions = _extract_report_notes(file_text)
             if parsed:
-                return parsed
+                return parsed, suggestions
         except OSError:
             pass
 
     if report.report_file and _is_image_file(report.report_file.path):
-        parsed, debug_message = _ocr_image_with_groq(report.report_file.path)
+        parsed, suggestions, debug_message = _ocr_image_with_groq(report.report_file.path)
         if parsed:
             if not report.ocr_text:
                 report.ocr_text = "\n".join(
                     [f"{p['name']} {p['value']} {p.get('unit', '')}".strip() for p in parsed]
                 )
                 report.save(update_fields=["ocr_text"])
-            return parsed
+            return parsed, suggestions
         report.ocr_text = debug_message[:10000]
         report.save(update_fields=["ocr_text"])
-        return []
+        return [], suggestions
 
     report.ocr_text = "No parseable text found from upload. Try a clearer image or paste report text."
     report.save(update_fields=["ocr_text"])
-    return []
+    return [], []
 
 
 def _parse_lines_to_parameters(text: str) -> list[dict]:
@@ -343,15 +394,15 @@ def _is_image_file(path: str) -> bool:
     return bool(mime_type and mime_type.startswith("image/"))
 
 
-def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], str]:
+def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], list[str], str]:
     api_key = getattr(settings, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
     if not api_key:
-        return [], "OCR failed: GROQ_API_KEY not set."
+        return [], [], "OCR failed: GROQ_API_KEY not set."
 
     try:
         data_url = _file_to_data_url(file_path)
     except OSError:
-        return [], "OCR failed: uploaded file could not be read."
+        return [], [], "OCR failed: uploaded file could not be read."
 
     configured = getattr(settings, "GROQ_VISION_MODEL", "llama-3.2-11b-vision-preview")
     model_candidates = [m.strip() for m in configured.split(",") if m.strip()]
@@ -360,8 +411,8 @@ def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], str]:
 
     prompt = (
         "Extract lab parameters from this medical report image and return strict JSON only.\n"
-        'Format: {"parameters":[{"name":"Hemoglobin","value":11.2,"unit":"g/dL","ref_min":12,"ref_max":16}]}\n'
-        "Rules: include only rows with numeric values, use null for missing ref_min/ref_max."
+        'Format: {"parameters":[{"name":"Hemoglobin","value":11.2,"unit":"g/dL","ref_min":12,"ref_max":16}],"doctor_suggestions":["free-text doctor comments/suggestions/notes"]}\n'
+        "Rules: include only rows with numeric values in parameters, use null for missing ref_min/ref_max, and collect non-tabular doctor notes in doctor_suggestions."
     )
 
     for model in dict.fromkeys(model_candidates):
@@ -392,20 +443,23 @@ def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], str]:
             payload = _parse_json_response(content)
             if not payload:
                 rows = _parse_lines_to_parameters(content)
+                suggestions = _extract_report_notes(content)
                 if rows:
-                    return rows, f"OCR succeeded with {model} using text parse."
+                    return rows, suggestions, f"OCR succeeded with {model} using text parse."
                 tried.append(f"{model}: response not parseable")
                 continue
+            suggestions = []
             if isinstance(payload, dict):
+                suggestions = _normalize_suggestions(payload.get("doctor_suggestions", []))
                 payload = payload.get("parameters", [])
             rows = _normalize_parameters(payload if isinstance(payload, list) else [])
             if rows:
-                return rows, f"OCR succeeded with {model}."
+                return rows, suggestions, f"OCR succeeded with {model}."
             tried.append(f"{model}: no numeric parameters")
         except Exception as exc:
             tried.append(f"{model}: {exc}")
 
-    return [], "OCR failed after trying models. " + " | ".join(tried[:4])
+    return [], [], "OCR failed after trying models. " + " | ".join(tried[:4])
 
 
 def _file_to_data_url(file_path: str) -> str:
@@ -437,6 +491,17 @@ def _normalize_parameters(items: list[dict]) -> list[dict]:
     return rows
 
 
+def _normalize_suggestions(items) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    cleaned = []
+    for item in items:
+        text = str(item or "").strip()
+        if text:
+            cleaned.append(text)
+    return cleaned[:6]
+
+
 def _build_trend_hint(context: dict) -> str:
     reports = context.get("reports", [])
     if len(reports) < 2:
@@ -465,13 +530,76 @@ def _build_trend_hint(context: dict) -> str:
     return "Trend snapshot: " + "; ".join(deltas[:5]) + "."
 
 
+def _extract_report_notes(text: str) -> list[str]:
+    if not text:
+        return []
+
+    note_keywords = (
+        "advice",
+        "suggestion",
+        "recommend",
+        "recommendation",
+        "doctor",
+        "consult",
+        "follow up",
+        "follow-up",
+        "impression",
+        "comment",
+        "note",
+        "remark",
+    )
+    notes = []
+    for raw_line in text.splitlines():
+        line = " ".join(raw_line.strip().split())
+        if not line:
+            continue
+        has_number = bool(re.search(r"\d", line))
+        looks_parameter = has_number and bool(
+            re.search(
+                r"[-+]?\d*\.?\d+\s*([A-Za-z%\/0-9\^\.]+)?\s*([-to]+\s*[-+]?\d*\.?\d+)?$",
+                line,
+                re.IGNORECASE,
+            )
+        )
+        if looks_parameter:
+            continue
+        low = line.lower()
+        if any(keyword in low for keyword in note_keywords) or len(line.split()) >= 6:
+            notes.append(line)
+        if len(notes) >= 6:
+            break
+    return notes
+
+
 def _ensure_analysis_shape(parsed: dict, context: dict) -> dict:
     fallback = fallback_analysis(context)
     return {
-        "mentor_summary": parsed.get("mentor_summary") or fallback["mentor_summary"],
-        "trend_analysis": parsed.get("trend_analysis") or fallback["trend_analysis"],
-        "doctor_summary": parsed.get("doctor_summary") or fallback["doctor_summary"],
+        "mentor_summary": _coerce_to_text(parsed.get("mentor_summary")) or fallback["mentor_summary"],
+        "trend_analysis": _coerce_to_text(parsed.get("trend_analysis")) or fallback["trend_analysis"],
+        "doctor_summary": _coerce_to_text(parsed.get("doctor_summary")) or fallback["doctor_summary"],
+        "doctor_suggestions_considered": (
+            _normalize_suggestions(parsed.get("doctor_suggestions_considered", []))
+            or fallback.get("doctor_suggestions_considered", [])
+        ),
     }
+
+
+def _coerce_to_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        lines = [str(item).strip() for item in value if str(item).strip()]
+        return "\n".join(lines)
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            text = str(item).strip()
+            if text:
+                lines.append(f"{str(key).replace('_', ' ').title()}: {text}")
+        return "\n".join(lines)
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:

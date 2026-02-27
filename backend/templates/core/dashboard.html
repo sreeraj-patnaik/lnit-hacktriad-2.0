@@ -1,40 +1,100 @@
 {% extends "base.html" %}
+{% block title %}Dashboard | Aarogya Health Command{% endblock %}
 {% block content %}
-<h2>Dashboard</h2>
-<p><strong>User:</strong> {{ request.user.username }}</p>
-<p><strong>Profile age:</strong> {{ profile.age|default:"Not set" }}</p>
+<section class="hero-card">
+    <div>
+        <p class="eyebrow">Patient Workspace</p>
+        <h1>Welcome, {{ request.user.username }}</h1>
+        <p class="hero-copy">
+            Track your report history, monitor flagged trends, and review doctor-style explanations in one enterprise-grade console.
+        </p>
+        <div class="action-row">
+            <a href="{% url 'report-upload' %}" class="btn-primary">Upload New Scan</a>
+            <a href="{% url 'profile' %}" class="btn-quiet">Update Profile Context</a>
+        </div>
+    </div>
+    <div class="patient-chip">
+        <p><strong>Age:</strong> {{ profile.age|default:"Not set" }}</p>
+        <p><strong>City:</strong> {{ profile.city|default:"Not set" }}</p>
+        <p><strong>Health Goal:</strong> {{ profile.health_goal|default:"Not set" }}</p>
+    </div>
+</section>
 
-<a href="{% url 'report-upload' %}" role="button">Upload New Report</a>
+<section class="stat-grid">
+    <article class="stat-card">
+        <p>Total Reports</p>
+        <h2>{{ stats.total_reports }}</h2>
+    </article>
+    <article class="stat-card">
+        <p>Analyses Completed</p>
+        <h2>{{ stats.completed_reports }}</h2>
+    </article>
+    <article class="stat-card danger">
+        <p>High-Risk Markers</p>
+        <h2>{{ stats.flagged_high }}</h2>
+    </article>
+    <article class="stat-card warning">
+        <p>Low-Risk Markers</p>
+        <h2>{{ stats.flagged_low }}</h2>
+    </article>
+</section>
 
-<h3>Your Previous Scans</h3>
-{% if reports %}
-    <table>
-        <thead>
-        <tr>
-            <th>Date</th>
-            <th>File</th>
-            <th>Analysis</th>
-            <th>Action</th>
-        </tr>
-        </thead>
-        <tbody>
-        {% for report in reports %}
-            <tr>
-                <td>{{ report.report_date }}</td>
-                <td>
-                    {% if report.report_file %}
-                        <a href="{{ report.report_file.url }}" target="_blank">Open</a>
-                    {% else %}
-                        Text input
-                    {% endif %}
-                </td>
-                <td>{% if report.analysis_completed %}Completed{% else %}Pending{% endif %}</td>
-                <td><a href="{% url 'report-detail' report.id %}">View</a></td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-{% else %}
-    <p>No reports yet.</p>
-{% endif %}
+<section class="panel">
+    <div class="panel-head">
+        <h3>Past Scan Timeline</h3>
+        <p>Color-coded by parameter risk status for quick review.</p>
+    </div>
+    {% if report_rows %}
+        <div class="table-wrap">
+            <table class="report-table">
+                <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Trend Flags</th>
+                    <th>Summary Depth</th>
+                    <th>Action</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for row in report_rows %}
+                    <tr>
+                        <td>{{ row.report.report_date }}</td>
+                        <td>
+                            {% if row.report.report_file %}
+                                <a href="{{ row.report.report_file.url }}" target="_blank">Uploaded File</a>
+                            {% else %}
+                                Text Input
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.report.analysis_completed %}
+                                <span class="tag success">Analyzed</span>
+                            {% else %}
+                                <span class="tag neutral">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.high_count %}
+                                <span class="tag danger">{{ row.high_count }} high</span>
+                            {% endif %}
+                            {% if row.low_count %}
+                                <span class="tag warning">{{ row.low_count }} low</span>
+                            {% endif %}
+                            {% if not row.high_count and not row.low_count %}
+                                <span class="tag success">No red flags</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.parameter_count }} markers | {{ row.normal_count }} normal</td>
+                        <td><a class="inline-link" href="{% url 'report-detail' row.report.id %}">View Detail</a></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="empty-state">No scans yet. Upload your first report to start trend tracking.</p>
+    {% endif %}
+</section>
 {% endblock %}

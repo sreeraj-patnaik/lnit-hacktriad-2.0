@@ -1,62 +1,225 @@
 {% extends "base.html" %}
+{% block title %}Report Detail | Aarogya Health Command{% endblock %}
 {% block content %}
-<h2>Report Details</h2>
-<p><strong>Date:</strong> {{ report.report_date }}</p>
-<p>
-    <strong>File:</strong>
-    {% if report.report_file %}
-        <a href="{{ report.report_file.url }}" target="_blank">Open report file</a>
+<section class="hero-card report-hero">
+    <div>
+        <p class="eyebrow">Report Detail</p>
+        <h1>Scan from {{ report.report_date }}</h1>
+        <p class="hero-copy">
+            Parameter extraction, trend interpretation, and doctor-style narrative are combined below.
+        </p>
+    </div>
+    <div class="patient-chip">
+        <p><strong>Source:</strong>
+            {% if report.report_file %}
+                <a href="{{ report.report_file.url }}" target="_blank">Open uploaded file</a>
+            {% else %}
+                Text input mode
+            {% endif %}
+        </p>
+        <p><strong>Analysis:</strong>
+            {% if report.analysis_completed %}
+                <span class="tag success">Completed</span>
+            {% else %}
+                <span class="tag neutral">Pending</span>
+            {% endif %}
+        </p>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-head">
+        <h3>Extracted Lab Parameters</h3>
+        <p>Color coding highlights where immediate review may be needed.</p>
+    </div>
+    {% if parameters %}
+        <div class="table-wrap">
+            <table class="report-table">
+                <thead>
+                <tr>
+                    <th>Parameter</th>
+                    <th>Value</th>
+                    <th>Reference Range</th>
+                    <th>Risk</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for p in parameters %}
+                    <tr>
+                        <td>{{ p.name }}</td>
+                        <td>{{ p.value }} {{ p.unit }}</td>
+                        <td>{{ p.ref_min }} - {{ p.ref_max }}</td>
+                        <td>
+                            {% if p.risk_flag == "high" %}
+                                <span class="tag danger">High</span>
+                            {% elif p.risk_flag == "low" %}
+                                <span class="tag warning">Low</span>
+                            {% elif p.risk_flag == "normal" %}
+                                <span class="tag success">Normal</span>
+                            {% else %}
+                                <span class="tag neutral">Unknown</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
     {% else %}
-        No file uploaded (text input mode)
+        <p class="empty-state">No parameters were extracted from this upload.</p>
     {% endif %}
-</p>
+</section>
 
-{% if report.ocr_text %}
-<h3>Input/OCR Text</h3>
-<pre>{{ report.ocr_text }}</pre>
-{% endif %}
-
-<h3>Extracted Lab Parameters</h3>
-{% if parameters %}
-    <table>
-        <thead>
-        <tr>
-            <th>Parameter</th>
-            <th>Value</th>
-            <th>Reference Range</th>
-            <th>Risk</th>
-        </tr>
-        </thead>
-        <tbody>
-        {% for p in parameters %}
-            <tr>
-                <td>{{ p.name }}</td>
-                <td>{{ p.value }} {{ p.unit }}</td>
-                <td>{{ p.ref_min }} - {{ p.ref_max }}</td>
-                <td>{{ p.risk_flag }}</td>
-            </tr>
+{% if trend_series %}
+<section class="panel">
+    <div class="panel-head">
+        <h3>Graphical Trend Analysis</h3>
+        <p>Visual trend lines with color-coded highlights from your past scans to this report.</p>
+    </div>
+    <div class="trend-grid">
+        {% for series in trend_series %}
+            <article class="trend-card">
+                <div class="trend-top">
+                    <div>
+                        <h4>{{ series.name }}</h4>
+                        <p class="trend-meta">{{ series.point_count }} data points | {{ series.first_date }} to {{ series.last_date }}</p>
+                    </div>
+                    <div class="trend-stats">
+                        <p class="trend-value">{{ series.latest_value }} {{ series.unit }}</p>
+                        {% if series.delta is not None %}
+                            {% if series.direction == "up" %}
+                                <span class="tag {% if series.latest_risk == 'high' %}danger{% else %}warning{% endif %}">▲ {{ series.delta }}</span>
+                            {% elif series.direction == "down" %}
+                                <span class="tag {% if series.latest_risk == 'low' %}warning{% else %}success{% endif %}">▼ {{ series.delta|floatformat:2|cut:"-" }}</span>
+                            {% else %}
+                                <span class="tag neutral">No change</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="tag neutral">First reading</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <svg class="sparkline risk-{{ series.latest_risk }}" data-trend-index="{{ forloop.counter0 }}" viewBox="0 0 220 72" aria-label="{{ series.name }} trend graph"></svg>
+                <div class="trend-axis">
+                    <span>{{ series.first_date }}</span>
+                    <span>{{ series.last_date }}</span>
+                </div>
+            </article>
         {% endfor %}
-        </tbody>
-    </table>
-{% else %}
-    <p>No parameters extracted.</p>
+    </div>
+</section>
+{{ trend_series|json_script:"trend-series-data" }}
 {% endif %}
 
-<h3>LLM Mentor Output</h3>
+{% if report.doctor_suggestions %}
+<section class="panel">
+    <div class="panel-head">
+        <h3>Doctor Suggestions Found in Report</h3>
+        <p>Non-tabular notes and clinician comments parsed from the uploaded text.</p>
+    </div>
+    <ul class="notes-list">
+        {% for note in report.doctor_suggestions %}
+            <li>{{ note }}</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 {% if analysis %}
-    <article>
+<section class="panel">
+    <div class="panel-head">
+        <h3>Detailed Health Narrative</h3>
+        <p>Expanded person-to-person explanation using your history, profile, and latest scan.</p>
+    </div>
+    <article class="analysis-block">
         <h4>Present Condition Summary</h4>
         <p>{{ analysis.mentor_summary }}</p>
     </article>
-    <article>
-        <h4>Trends</h4>
+    <article class="analysis-block">
+        <h4>Trend Interpretation</h4>
         <p>{{ analysis.trend_analysis }}</p>
     </article>
-    <article>
+    <article class="analysis-block">
         <h4>Doctor Handoff Summary</h4>
         <p>{{ analysis.doctor_summary }}</p>
     </article>
+    {% if analysis.raw_response.doctor_suggestions_considered %}
+        <article class="analysis-block">
+            <h4>Doctor Suggestions Considered by AI</h4>
+            <ul class="notes-list">
+                {% for note in analysis.raw_response.doctor_suggestions_considered %}
+                    <li>{{ note }}</li>
+                {% endfor %}
+            </ul>
+        </article>
+    {% endif %}
+</section>
 {% else %}
-    <p>Analysis not available yet.</p>
+<section class="panel">
+    <p class="empty-state">Analysis is not available yet for this report.</p>
+</section>
 {% endif %}
+
+{% if report.ocr_text %}
+<section class="panel">
+    <div class="panel-head">
+        <h3>Input / OCR Capture</h3>
+        <p>Raw extracted text used as analysis input.</p>
+    </div>
+    <pre class="ocr-block">{{ report.ocr_text }}</pre>
+</section>
+{% endif %}
+<script>
+    (function () {
+        const payload = document.getElementById("trend-series-data");
+        if (!payload) return;
+
+        let trendData = [];
+        try {
+            trendData = JSON.parse(payload.textContent);
+        } catch (e) {
+            return;
+        }
+
+        const ns = "http://www.w3.org/2000/svg";
+        const charts = document.querySelectorAll(".sparkline[data-trend-index]");
+        charts.forEach((chart) => {
+            const index = Number(chart.getAttribute("data-trend-index"));
+            const series = trendData[index];
+            const points = (series && series.points) ? series.points : [];
+            if (!points.length) return;
+
+            const width = 220;
+            const height = 72;
+            const padX = 8;
+            const padY = 8;
+            const values = points.map((item) => Number(item.value));
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const range = (max - min) || 1;
+
+            const coords = values.map((value, i) => {
+                const x = padX + ((width - (2 * padX)) * (points.length === 1 ? 0.5 : i / (points.length - 1)));
+                const y = (height - padY) - ((value - min) / range) * (height - (2 * padY));
+                return { x, y };
+            });
+
+            const polyline = document.createElementNS(ns, "polyline");
+            polyline.setAttribute("fill", "none");
+            polyline.setAttribute("stroke-width", "2.8");
+            polyline.setAttribute("stroke-linecap", "round");
+            polyline.setAttribute("stroke-linejoin", "round");
+            polyline.setAttribute("points", coords.map((c) => `${c.x},${c.y}`).join(" "));
+            chart.appendChild(polyline);
+
+            coords.forEach((coord, idx) => {
+                const circle = document.createElementNS(ns, "circle");
+                circle.setAttribute("cx", String(coord.x));
+                circle.setAttribute("cy", String(coord.y));
+                circle.setAttribute("r", idx === coords.length - 1 ? "3.6" : "2.2");
+                chart.appendChild(circle);
+            });
+        });
+    })();
+</script>
 {% endblock %}
