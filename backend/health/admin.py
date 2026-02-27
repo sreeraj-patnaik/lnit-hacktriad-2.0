@@ -13,6 +13,7 @@ class MedicalReportAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "report_date", "analysis_completed", "created_at")
     list_filter = ("analysis_completed", "report_date")
     search_fields = ("user__username", "user__email")
+    readonly_fields = ("doctor_suggestions",)
     inlines = [LabParameterInline]
 
 

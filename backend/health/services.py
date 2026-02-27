@@ -9,12 +9,14 @@ from django.conf import settings
 from django.db import transaction
 
 from core.models import UserProfile
+from .guardrails import run_input_guardrails, run_output_guardrails
 from .models import AnalysisResult, LabParameter, MedicalReport
 
 
 def process_report(report_id: int) -> AnalysisResult:
     report = MedicalReport.objects.select_related("user").get(id=report_id)
-    extracted_data = run_ocr(report)
+    extracted_data, doctor_suggestions = run_ocr(report)
+    input_guardrail_result = run_input_guardrails(report=report, extracted_data=extracted_data)
 
     with transaction.atomic():
         report.parameters.all().delete()
@@ -28,14 +30,31 @@ def process_report(report_id: int) -> AnalysisResult:
                 ref_max=item.get("ref_max"),
                 risk_flag=classify(item["value"], item.get("ref_min"), item.get("ref_max")),
             )
+        report.doctor_suggestions = doctor_suggestions
+        report.save(update_fields=["doctor_suggestions"])
 
         context = prepare_llm_context(report)
-        result = generate_analysis(context)
+        lab_parameters = list(report.parameters.values("name", "value", "unit", "ref_min", "ref_max", "risk_flag"))
+        if input_guardrail_result.get("safe"):
+            ai_result = generate_analysis(context)
+            result = run_output_guardrails(
+                ai_output=ai_result,
+                parameters=lab_parameters,
+                input_confidence=input_guardrail_result.get("confidence", 0.0),
+            )
+        else:
+            result = _build_input_guardrail_blocked_analysis(context, input_guardrail_result)
+
+        result["guardrail_meta"] = {
+            **(result.get("guardrail_meta") or {}),
+            "input_guardrails": input_guardrail_result,
+        }
         analysis, _ = AnalysisResult.objects.update_or_create(
             report=report,
             defaults={
                 "user": report.user,
-                "mentor_summary": result.get("mentor_summary", ""),
+                "mentor_summary": result.get("comprehensive_narrative")
+                or result.get("mentor_summary", ""),
                 "trend_analysis": result.get("trend_analysis", ""),
                 "doctor_summary": result.get("doctor_summary", ""),
                 "raw_response": result,
@@ -50,7 +69,7 @@ def process_report(report_id: int) -> AnalysisResult:
 
 def prepare_llm_context(report: MedicalReport) -> dict:
     user = report.user
-    profile = UserProfile.objects.get(user=user)
+    profile, _ = UserProfile.objects.get_or_create(user=user)
     reports = (
         MedicalReport.objects.filter(user=user)
         .order_by("report_date", "created_at")
@@ -59,6 +78,7 @@ def prepare_llm_context(report: MedicalReport) -> dict:
 
     reports_data = []
     for report_item in reports:
+        raw_text = (report_item.ocr_text or "").strip()
         params = [
             {
                 "name": p.name,
@@ -76,6 +96,9 @@ def prepare_llm_context(report: MedicalReport) -> dict:
                 "date": str(report_item.report_date),
                 "parameter_count": len(params),
                 "parameters": params,
+                "report_text_excerpt": raw_text[:3000],
+                "doctor_notes_or_comments": report_item.doctor_suggestions
+                or _extract_report_notes(raw_text),
             }
         )
 
@@ -101,6 +124,8 @@ def prepare_llm_context(report: MedicalReport) -> dict:
             },
         },
         "reports": reports_data,
+        "current_report_doctor_suggestions": report.doctor_suggestions
+        or _extract_report_notes((report.ocr_text or "").strip()),
     }
 
 
@@ -111,21 +136,36 @@ def generate_analysis(context: dict) -> dict:
 
     model = getattr(settings, "GROQ_MODEL", "llama-3.1-8b-instant")
     prompt = f"""
-You are a safety-first health trajectory interpreter.
+You are a safety-first family-doctor style health report explainer.
 
-Rules:
-- Explain only from the provided data.
-- No diagnosis and no medication advice.
-- Use calm, actionable, non-alarming language.
-- Mention trends, borderline concerns, and changes over time.
-- Produce practical lifestyle guidance only.
+Audience and tone:
+- Speak directly to the person in plain language, with empathy and clarity.
+- Sound like a thoughtful family doctor, not a technical bot.
+- Be detailed and context-aware using personal profile, symptoms, lifestyle, medications, and report history.
+
+Data interpretation rules:
+- Use only provided data.
+- No diagnosis and no medication prescriptions.
+- Include all relevant details from report text, including doctor notes/comments/suggestions if present.
+- Explain what each key marker means in everyday language, why it may matter, and whether it changed over time.
+- Call out stable, improving, worsening, and borderline trends.
+- Mention where uncertainty exists (missing refs, unclear OCR, sparse history).
+- Provide practical next-step guidance and questions to discuss with a clinician.
 
 Return ONLY valid JSON with this schema:
 {{
-  "mentor_summary": "plain-language explanation",
-  "trend_analysis": "what is increasing/decreasing/stable",
-  "doctor_summary": "concise handoff summary for doctor consultation"
+  "comprehensive_narrative": "single long, coherent, person-to-person interpretation that integrates current status, trends, lifestyle context, symptoms, doctor notes, and practical next steps in one flow",
+  "mentor_summary": "short optional summary line",
+  "trend_analysis": "detailed trend and timeline interpretation across reports",
+  "doctor_summary": "structured and concise clinical handoff including key values, trends, symptoms, and note text highlights",
+  "doctor_suggestions_considered": ["list of doctor notes/comments/suggestions considered while writing this output"]
 }}
+
+Important style constraints:
+- Write one continuous narrative, not fragmented sections.
+- Do not restate a full dump of all parameter values; the table already shows them.
+- Focus on interpretation: what it means for this person, what patterns matter, what to monitor next.
+- Use warm clinical language, like a trusted family doctor speaking directly to the patient.
 
 DATA:
 {json.dumps(context, indent=2)}
@@ -192,47 +232,82 @@ def fallback_analysis(context: dict) -> dict:
     normal_count = len([p for p in latest_report.get("parameters", []) if p.get("risk_flag") == "normal"])
 
     trend_hint = _build_trend_hint(context)
+    user_context = context.get("user_context", {}) or {}
+    doctor_notes = latest_report.get("doctor_notes_or_comments", []) or []
+    notes_line = (
+        " I also noticed report comments/notes: "
+        + "; ".join(doctor_notes[:3])
+        + "."
+        if doctor_notes
+        else ""
+    )
     if not latest_params:
         mentor_summary = (
             "No lab parameters could be extracted from the latest upload. "
             "Please upload a clearer photo or paste report text in structured lines."
+            f"{notes_line}"
         )
     else:
+        symptoms = user_context.get("current_symptoms") or "not provided"
+        conditions = user_context.get("past_medical_conditions") or "not provided"
+        medications = user_context.get("medications") or "not provided"
+        lifestyle = user_context.get("lifestyle") or {}
+        lifestyle_line = (
+            f"Sleep: {lifestyle.get('sleep_hours') or 'NA'}h, "
+            f"Activity: {lifestyle.get('activity_level') or 'NA'}, "
+            f"Diet: {lifestyle.get('diet_type') or 'NA'}."
+        )
         mentor_summary = (
-            f"Your latest report has {normal_count} parameters in the normal range. "
-            f"High markers: {', '.join(high) if high else 'none'}. "
-            f"Low markers: {', '.join(low) if low else 'none'}. "
-            "This is an educational summary and should be validated with your doctor."
+            "I reviewed your latest report together with your profile and previous records. "
+            f"In this report, {normal_count} markers are in the normal range. "
+            f"Markers running higher than range: {', '.join(high) if high else 'none identified'}. "
+            f"Markers below range: {', '.join(low) if low else 'none identified'}. "
+            f"Your shared symptoms: {symptoms}. Past conditions: {conditions}. Current medicines: {medications}. "
+            f"Lifestyle context: {lifestyle_line}{notes_line} "
+            "Please treat this as educational guidance and confirm with your clinician."
         )
 
     return {
+        "comprehensive_narrative": _build_comprehensive_fallback_narrative(context),
         "mentor_summary": mentor_summary,
         "trend_analysis": (
             f"{trend_hint} "
+            "This trend view is generated from available records and may be limited by OCR quality or missing ranges. "
             "For richer narrative insight, set GROQ_API_KEY."
         ),
         "doctor_summary": (
-            "Patient has longitudinal report history with profile context. "
-            "Please review flagged high/low parameters against symptoms and history."
+            "Longitudinal review prepared with profile context. "
+            f"Current high markers: {', '.join(high) if high else 'none'}. "
+            f"Current low markers: {', '.join(low) if low else 'none'}. "
+            f"Reported symptoms: {user_context.get('current_symptoms') or 'not provided'}. "
+            f"Past conditions: {user_context.get('past_medical_conditions') or 'not provided'}. "
+            + (
+                f"Report note highlights: {'; '.join(doctor_notes[:3])}. "
+                if doctor_notes
+                else ""
+            )
+            + "Please correlate with clinical history and examination."
         ),
+        "doctor_suggestions_considered": doctor_notes[:6],
     }
 
 
-def run_ocr(report: MedicalReport) -> list[dict]:
+def run_ocr(report: MedicalReport) -> tuple[list[dict], list[str]]:
     # MVP parser:
     # 1) Use pasted/report text if provided
     # 2) Parse uploaded .txt file if available
     manual_text = (report.ocr_text or "").strip()
     if manual_text:
         parsed = _parse_lines_to_parameters(manual_text)
+        suggestions = _extract_report_notes(manual_text)
         if parsed:
-            return parsed
+            return parsed, suggestions
         report.ocr_text = (
             "Provided text could not be parsed. "
             "Use one line per parameter like: Hemoglobin 11.2 g/dL 12-16"
         )
         report.save(update_fields=["ocr_text"])
-        return []
+        return [], suggestions
 
     if report.report_file and report.report_file.name.lower().endswith(".txt"):
         try:
@@ -242,27 +317,28 @@ def run_ocr(report: MedicalReport) -> list[dict]:
                 report.ocr_text = file_text[:10000]
                 report.save(update_fields=["ocr_text"])
             parsed = _parse_lines_to_parameters(file_text)
+            suggestions = _extract_report_notes(file_text)
             if parsed:
-                return parsed
+                return parsed, suggestions
         except OSError:
             pass
 
     if report.report_file and _is_image_file(report.report_file.path):
-        parsed, debug_message = _ocr_image_with_groq(report.report_file.path)
+        parsed, suggestions, debug_message = _ocr_image_with_groq(report.report_file.path)
         if parsed:
             if not report.ocr_text:
                 report.ocr_text = "\n".join(
                     [f"{p['name']} {p['value']} {p.get('unit', '')}".strip() for p in parsed]
                 )
                 report.save(update_fields=["ocr_text"])
-            return parsed
+            return parsed, suggestions
         report.ocr_text = debug_message[:10000]
         report.save(update_fields=["ocr_text"])
-        return []
+        return [], suggestions
 
     report.ocr_text = "No parseable text found from upload. Try a clearer image or paste report text."
     report.save(update_fields=["ocr_text"])
-    return []
+    return [], []
 
 
 def _parse_lines_to_parameters(text: str) -> list[dict]:
@@ -343,15 +419,15 @@ def _is_image_file(path: str) -> bool:
     return bool(mime_type and mime_type.startswith("image/"))
 
 
-def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], str]:
+def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], list[str], str]:
     api_key = getattr(settings, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
     if not api_key:
-        return [], "OCR failed: GROQ_API_KEY not set."
+        return [], [], "OCR failed: GROQ_API_KEY not set."
 
     try:
         data_url = _file_to_data_url(file_path)
     except OSError:
-        return [], "OCR failed: uploaded file could not be read."
+        return [], [], "OCR failed: uploaded file could not be read."
 
     configured = getattr(settings, "GROQ_VISION_MODEL", "llama-3.2-11b-vision-preview")
     model_candidates = [m.strip() for m in configured.split(",") if m.strip()]
@@ -360,8 +436,8 @@ def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], str]:
 
     prompt = (
         "Extract lab parameters from this medical report image and return strict JSON only.\n"
-        'Format: {"parameters":[{"name":"Hemoglobin","value":11.2,"unit":"g/dL","ref_min":12,"ref_max":16}]}\n'
-        "Rules: include only rows with numeric values, use null for missing ref_min/ref_max."
+        'Format: {"parameters":[{"name":"Hemoglobin","value":11.2,"unit":"g/dL","ref_min":12,"ref_max":16}],"doctor_suggestions":["free-text doctor comments/suggestions/notes"]}\n'
+        "Rules: include only rows with numeric values in parameters, use null for missing ref_min/ref_max, and collect non-tabular doctor notes in doctor_suggestions."
     )
 
     for model in dict.fromkeys(model_candidates):
@@ -392,20 +468,23 @@ def _ocr_image_with_groq(file_path: str) -> tuple[list[dict], str]:
             payload = _parse_json_response(content)
             if not payload:
                 rows = _parse_lines_to_parameters(content)
+                suggestions = _extract_report_notes(content)
                 if rows:
-                    return rows, f"OCR succeeded with {model} using text parse."
+                    return rows, suggestions, f"OCR succeeded with {model} using text parse."
                 tried.append(f"{model}: response not parseable")
                 continue
+            suggestions = []
             if isinstance(payload, dict):
+                suggestions = _normalize_suggestions(payload.get("doctor_suggestions", []))
                 payload = payload.get("parameters", [])
             rows = _normalize_parameters(payload if isinstance(payload, list) else [])
             if rows:
-                return rows, f"OCR succeeded with {model}."
+                return rows, suggestions, f"OCR succeeded with {model}."
             tried.append(f"{model}: no numeric parameters")
         except Exception as exc:
             tried.append(f"{model}: {exc}")
 
-    return [], "OCR failed after trying models. " + " | ".join(tried[:4])
+    return [], [], "OCR failed after trying models. " + " | ".join(tried[:4])
 
 
 def _file_to_data_url(file_path: str) -> str:
@@ -437,6 +516,17 @@ def _normalize_parameters(items: list[dict]) -> list[dict]:
     return rows
 
 
+def _normalize_suggestions(items) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    cleaned = []
+    for item in items:
+        text = str(item or "").strip()
+        if text:
+            cleaned.append(text)
+    return cleaned[:6]
+
+
 def _build_trend_hint(context: dict) -> str:
     reports = context.get("reports", [])
     if len(reports) < 2:
@@ -465,13 +555,136 @@ def _build_trend_hint(context: dict) -> str:
     return "Trend snapshot: " + "; ".join(deltas[:5]) + "."
 
 
+def _extract_report_notes(text: str) -> list[str]:
+    if not text:
+        return []
+
+    note_keywords = (
+        "advice",
+        "suggestion",
+        "recommend",
+        "recommendation",
+        "doctor",
+        "consult",
+        "follow up",
+        "follow-up",
+        "impression",
+        "comment",
+        "note",
+        "remark",
+    )
+    notes = []
+    for raw_line in text.splitlines():
+        line = " ".join(raw_line.strip().split())
+        if not line:
+            continue
+        has_number = bool(re.search(r"\d", line))
+        looks_parameter = has_number and bool(
+            re.search(
+                r"[-+]?\d*\.?\d+\s*([A-Za-z%\/0-9\^\.]+)?\s*([-to]+\s*[-+]?\d*\.?\d+)?$",
+                line,
+                re.IGNORECASE,
+            )
+        )
+        if looks_parameter:
+            continue
+        low = line.lower()
+        if any(keyword in low for keyword in note_keywords) or len(line.split()) >= 6:
+            notes.append(line)
+        if len(notes) >= 6:
+            break
+    return notes
+
+
 def _ensure_analysis_shape(parsed: dict, context: dict) -> dict:
     fallback = fallback_analysis(context)
+    comprehensive = _coerce_to_text(parsed.get("comprehensive_narrative"))
+    mentor = _coerce_to_text(parsed.get("mentor_summary"))
     return {
-        "mentor_summary": parsed.get("mentor_summary") or fallback["mentor_summary"],
-        "trend_analysis": parsed.get("trend_analysis") or fallback["trend_analysis"],
-        "doctor_summary": parsed.get("doctor_summary") or fallback["doctor_summary"],
+        "comprehensive_narrative": comprehensive or fallback["comprehensive_narrative"],
+        "mentor_summary": mentor or comprehensive or fallback["mentor_summary"],
+        "trend_analysis": _coerce_to_text(parsed.get("trend_analysis")) or fallback["trend_analysis"],
+        "doctor_summary": _coerce_to_text(parsed.get("doctor_summary")) or fallback["doctor_summary"],
+        "doctor_suggestions_considered": (
+            _normalize_suggestions(parsed.get("doctor_suggestions_considered", []))
+            or fallback.get("doctor_suggestions_considered", [])
+        ),
     }
+
+
+def _coerce_to_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        lines = [str(item).strip() for item in value if str(item).strip()]
+        return "\n".join(lines)
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            text = str(item).strip()
+            if text:
+                lines.append(f"{str(key).replace('_', ' ').title()}: {text}")
+        return "\n".join(lines)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _build_comprehensive_fallback_narrative(context: dict) -> str:
+    reports = context.get("reports", []) or []
+    latest_report = reports[-1] if reports else {"parameters": []}
+    latest_params = latest_report.get("parameters", []) or []
+    user_context = context.get("user_context", {}) or {}
+
+    high = [p.get("name") for p in latest_params if p.get("risk_flag") == "high"]
+    low = [p.get("name") for p in latest_params if p.get("risk_flag") == "low"]
+    normal_count = len([p for p in latest_params if p.get("risk_flag") == "normal"])
+    trend_hint = _build_trend_hint(context)
+    doctor_notes = latest_report.get("doctor_notes_or_comments", []) or []
+
+    symptoms = user_context.get("current_symptoms") or "no symptoms shared currently"
+    conditions = user_context.get("past_medical_conditions") or "no major past conditions shared"
+    medications = user_context.get("medications") or "no current medicines listed"
+    lifestyle = user_context.get("lifestyle") or {}
+    sleep = lifestyle.get("sleep_hours") or "NA"
+    activity = lifestyle.get("activity_level") or "NA"
+    diet = lifestyle.get("diet_type") or "NA"
+
+    if not latest_params:
+        return (
+            "I could not reliably read lab values from this upload, so I cannot give a trustworthy interpretation yet. "
+            "Please upload a clearer scan or paste the report text line by line, and I will re-build your trend story. "
+            f"From your profile, I still consider your context important: symptoms are {symptoms}, past history is {conditions}, "
+            f"and medications are {medications}. Lifestyle currently reflects sleep around {sleep} hours, activity level {activity}, and diet type {diet}. "
+            "Once the values are readable, I will connect these factors with your marker patterns and give you a complete interpretation."
+        )
+
+    stability_note = (
+        "Most markers appear stable or within expected range in this cycle."
+        if not high and not low
+        else (
+            f"The main points needing attention are higher markers: {', '.join(high) if high else 'none'}, "
+            f"and lower markers: {', '.join(low) if low else 'none'}."
+        )
+    )
+    doctor_note_line = (
+        f" I also factored in your report notes: {'; '.join(doctor_notes[:3])}."
+        if doctor_notes
+        else ""
+    )
+
+    return (
+        "I reviewed this report in the context of your previous records and your personal health background, so this is not just a one-time reading. "
+        f"You currently have {normal_count} markers in normal range, and {stability_note} "
+        f"When I map this to your day-to-day context, your current symptoms are {symptoms}, your background history is {conditions}, "
+        f"and your medicine list shows {medications}. Your routine currently reflects sleep around {sleep} hours, activity level {activity}, and a {diet} diet, "
+        "which can meaningfully influence energy, recovery, and longer-term marker movement over time. "
+        f"Across timeline comparison, {trend_hint} "
+        "The practical takeaway is to continue monitoring consistency rather than reacting to one isolated number: keep sleep and activity regular, repeat follow-up testing on schedule, "
+        "and watch for any new symptoms that match trend shifts rather than isolated fluctuations."
+        f"{doctor_note_line} "
+        "Use this as a structured discussion aid with your clinician so decisions are based on your full history, not a single report snapshot."
+    )
 
 
 def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:
@@ -482,3 +695,24 @@ def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:
     if value > ref_max:
         return "high"
     return "normal"
+
+
+def _build_input_guardrail_blocked_analysis(context: dict, input_guardrail_result: dict) -> dict:
+    fallback = fallback_analysis(context)
+    reason = input_guardrail_result.get("reason") or "Input quality checks did not pass."
+    safe_text = (
+        "We could not generate a full AI interpretation because guardrails detected insufficient input quality. "
+        f"{reason} "
+        "Please upload a clearer report image or provide structured text lines (name, value, unit, range), then retry."
+    )
+    return {
+        "comprehensive_narrative": safe_text,
+        "mentor_summary": safe_text,
+        "trend_analysis": "Trend analysis is limited until input quality improves.",
+        "doctor_summary": fallback.get("doctor_summary", ""),
+        "doctor_suggestions_considered": fallback.get("doctor_suggestions_considered", []),
+        "guardrail_meta": {
+            "output_guardrails_skipped": True,
+            "confidence": "LOW",
+        },
+    }
