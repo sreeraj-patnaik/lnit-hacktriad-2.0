@@ -9,12 +9,14 @@ from django.conf import settings
 from django.db import transaction
 
 from core.models import UserProfile
+from .guardrails import run_input_guardrails, run_output_guardrails
 from .models import AnalysisResult, LabParameter, MedicalReport
 
 
 def process_report(report_id: int) -> AnalysisResult:
     report = MedicalReport.objects.select_related("user").get(id=report_id)
     extracted_data, doctor_suggestions = run_ocr(report)
+    input_guardrail_result = run_input_guardrails(report=report, extracted_data=extracted_data)
 
     with transaction.atomic():
         report.parameters.all().delete()
@@ -32,12 +34,27 @@ def process_report(report_id: int) -> AnalysisResult:
         report.save(update_fields=["doctor_suggestions"])
 
         context = prepare_llm_context(report)
-        result = generate_analysis(context)
+        lab_parameters = list(report.parameters.values("name", "value", "unit", "ref_min", "ref_max", "risk_flag"))
+        if input_guardrail_result.get("safe"):
+            ai_result = generate_analysis(context)
+            result = run_output_guardrails(
+                ai_output=ai_result,
+                parameters=lab_parameters,
+                input_confidence=input_guardrail_result.get("confidence", 0.0),
+            )
+        else:
+            result = _build_input_guardrail_blocked_analysis(context, input_guardrail_result)
+
+        result["guardrail_meta"] = {
+            **(result.get("guardrail_meta") or {}),
+            "input_guardrails": input_guardrail_result,
+        }
         analysis, _ = AnalysisResult.objects.update_or_create(
             report=report,
             defaults={
                 "user": report.user,
-                "mentor_summary": result.get("mentor_summary", ""),
+                "mentor_summary": result.get("comprehensive_narrative")
+                or result.get("mentor_summary", ""),
                 "trend_analysis": result.get("trend_analysis", ""),
                 "doctor_summary": result.get("doctor_summary", ""),
                 "raw_response": result,
@@ -137,11 +154,18 @@ Data interpretation rules:
 
 Return ONLY valid JSON with this schema:
 {{
-  "mentor_summary": "detailed person-to-person narrative summary",
+  "comprehensive_narrative": "single long, coherent, person-to-person interpretation that integrates current status, trends, lifestyle context, symptoms, doctor notes, and practical next steps in one flow",
+  "mentor_summary": "short optional summary line",
   "trend_analysis": "detailed trend and timeline interpretation across reports",
   "doctor_summary": "structured and concise clinical handoff including key values, trends, symptoms, and note text highlights",
   "doctor_suggestions_considered": ["list of doctor notes/comments/suggestions considered while writing this output"]
 }}
+
+Important style constraints:
+- Write one continuous narrative, not fragmented sections.
+- Do not restate a full dump of all parameter values; the table already shows them.
+- Focus on interpretation: what it means for this person, what patterns matter, what to monitor next.
+- Use warm clinical language, like a trusted family doctor speaking directly to the patient.
 
 DATA:
 {json.dumps(context, indent=2)}
@@ -244,6 +268,7 @@ def fallback_analysis(context: dict) -> dict:
         )
 
     return {
+        "comprehensive_narrative": _build_comprehensive_fallback_narrative(context),
         "mentor_summary": mentor_summary,
         "trend_analysis": (
             f"{trend_hint} "
@@ -573,8 +598,11 @@ def _extract_report_notes(text: str) -> list[str]:
 
 def _ensure_analysis_shape(parsed: dict, context: dict) -> dict:
     fallback = fallback_analysis(context)
+    comprehensive = _coerce_to_text(parsed.get("comprehensive_narrative"))
+    mentor = _coerce_to_text(parsed.get("mentor_summary"))
     return {
-        "mentor_summary": _coerce_to_text(parsed.get("mentor_summary")) or fallback["mentor_summary"],
+        "comprehensive_narrative": comprehensive or fallback["comprehensive_narrative"],
+        "mentor_summary": mentor or comprehensive or fallback["mentor_summary"],
         "trend_analysis": _coerce_to_text(parsed.get("trend_analysis")) or fallback["trend_analysis"],
         "doctor_summary": _coerce_to_text(parsed.get("doctor_summary")) or fallback["doctor_summary"],
         "doctor_suggestions_considered": (
@@ -602,6 +630,63 @@ def _coerce_to_text(value) -> str:
     return str(value).strip()
 
 
+def _build_comprehensive_fallback_narrative(context: dict) -> str:
+    reports = context.get("reports", []) or []
+    latest_report = reports[-1] if reports else {"parameters": []}
+    latest_params = latest_report.get("parameters", []) or []
+    user_context = context.get("user_context", {}) or {}
+
+    high = [p.get("name") for p in latest_params if p.get("risk_flag") == "high"]
+    low = [p.get("name") for p in latest_params if p.get("risk_flag") == "low"]
+    normal_count = len([p for p in latest_params if p.get("risk_flag") == "normal"])
+    trend_hint = _build_trend_hint(context)
+    doctor_notes = latest_report.get("doctor_notes_or_comments", []) or []
+
+    symptoms = user_context.get("current_symptoms") or "no symptoms shared currently"
+    conditions = user_context.get("past_medical_conditions") or "no major past conditions shared"
+    medications = user_context.get("medications") or "no current medicines listed"
+    lifestyle = user_context.get("lifestyle") or {}
+    sleep = lifestyle.get("sleep_hours") or "NA"
+    activity = lifestyle.get("activity_level") or "NA"
+    diet = lifestyle.get("diet_type") or "NA"
+
+    if not latest_params:
+        return (
+            "I could not reliably read lab values from this upload, so I cannot give a trustworthy interpretation yet. "
+            "Please upload a clearer scan or paste the report text line by line, and I will re-build your trend story. "
+            f"From your profile, I still consider your context important: symptoms are {symptoms}, past history is {conditions}, "
+            f"and medications are {medications}. Lifestyle currently reflects sleep around {sleep} hours, activity level {activity}, and diet type {diet}. "
+            "Once the values are readable, I will connect these factors with your marker patterns and give you a complete interpretation."
+        )
+
+    stability_note = (
+        "Most markers appear stable or within expected range in this cycle."
+        if not high and not low
+        else (
+            f"The main points needing attention are higher markers: {', '.join(high) if high else 'none'}, "
+            f"and lower markers: {', '.join(low) if low else 'none'}."
+        )
+    )
+    doctor_note_line = (
+        f" I also factored in your report notes: {'; '.join(doctor_notes[:3])}."
+        if doctor_notes
+        else ""
+    )
+
+    return (
+        "I reviewed this report in the context of your previous records and your personal health background, so this is not just a one-time reading. "
+        f"You currently have {normal_count} markers in normal range, and {stability_note} "
+        f"When I map this to your day-to-day context, your current symptoms are {symptoms}, your background history is {conditions}, "
+        f"and your medicine list shows {medications}. Your routine currently reflects sleep around {sleep} hours, activity level {activity}, and a {diet} diet, "
+        "which can meaningfully influence energy, recovery, and longer-term marker movement over time. "
+        f"Across timeline comparison, {trend_hint} "
+        "The practical takeaway is to continue monitoring consistency rather than reacting to one isolated number: keep sleep and activity regular, repeat follow-up testing on schedule, "
+        "and watch for any new symptoms that match trend shifts rather than isolated fluctuations."
+        f"{doctor_note_line} "
+        "Use this as a structured discussion aid with your clinician so decisions are based on your full history, not a single report snapshot."
+    )
+
+
 def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:
     if ref_min is None or ref_max is None:
         return "unknown"
@@ -610,3 +695,24 @@ def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:
     if value > ref_max:
         return "high"
     return "normal"
+
+
+def _build_input_guardrail_blocked_analysis(context: dict, input_guardrail_result: dict) -> dict:
+    fallback = fallback_analysis(context)
+    reason = input_guardrail_result.get("reason") or "Input quality checks did not pass."
+    safe_text = (
+        "We could not generate a full AI interpretation because guardrails detected insufficient input quality. "
+        f"{reason} "
+        "Please upload a clearer report image or provide structured text lines (name, value, unit, range), then retry."
+    )
+    return {
+        "comprehensive_narrative": safe_text,
+        "mentor_summary": safe_text,
+        "trend_analysis": "Trend analysis is limited until input quality improves.",
+        "doctor_summary": fallback.get("doctor_summary", ""),
+        "doctor_suggestions_considered": fallback.get("doctor_suggestions_considered", []),
+        "guardrail_meta": {
+            "output_guardrails_skipped": True,
+            "confidence": "LOW",
+        },
+    }

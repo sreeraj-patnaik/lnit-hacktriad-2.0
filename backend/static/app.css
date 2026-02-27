@@ -541,6 +541,33 @@ h4 {
     font-size: 0.78rem;
 }
 
+.tts-panel {
+    margin-top: 10px;
+}
+
+.tts-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0 4px;
+}
+
+.tts-controls label {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.tts-controls select {
+    min-width: 170px;
+    border-radius: 10px;
+    border: 1px solid #c8d6e7;
+    background: #fbfdff;
+    color: var(--text);
+    font-size: 0.9rem;
+    padding: 8px 10px;
+}
+
 .sparkline {
     display: block;
     width: 100%;
