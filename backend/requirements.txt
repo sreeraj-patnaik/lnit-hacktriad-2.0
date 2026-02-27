@@ -1,4 +1,4 @@
-﻿Django==6.0.2
+Django==6.0.2
 djangorestframework==3.16.1
 django-cors-headers==4.9.0
 requests==2.32.5
