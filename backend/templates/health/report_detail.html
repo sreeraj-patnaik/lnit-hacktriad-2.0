@@ -88,9 +88,9 @@
                         <p class="trend-value">{{ series.latest_value }} {{ series.unit }}</p>
                         {% if series.delta is not None %}
                             {% if series.direction == "up" %}
-                                <span class="tag {% if series.latest_risk == 'high' %}danger{% else %}warning{% endif %}">▲ {{ series.delta }}</span>
+                                <span class="tag {% if series.latest_risk == 'high' %}danger{% else %}warning{% endif %}">&#9650; {{ series.delta }}</span>
                             {% elif series.direction == "down" %}
-                                <span class="tag {% if series.latest_risk == 'low' %}warning{% else %}success{% endif %}">▼ {{ series.delta|floatformat:2|cut:"-" }}</span>
+                                <span class="tag {% if series.latest_risk == 'low' %}warning{% else %}success{% endif %}">&#9660; {{ series.delta|floatformat:2|cut:"-" }}</span>
                             {% else %}
                                 <span class="tag neutral">No change</span>
                             {% endif %}
@@ -128,30 +128,43 @@
 {% if analysis %}
 <section class="panel">
     <div class="panel-head">
-        <h3>Detailed Health Narrative</h3>
-        <p>Expanded person-to-person explanation using your history, profile, and latest scan.</p>
+        <h3>Personalized Clinical Interpretation</h3>
+        <p>Single integrated, context-aware explanation from your profile, history, trends, and latest report.</p>
     </div>
     <article class="analysis-block">
-        <h4>Present Condition Summary</h4>
-        <p>{{ analysis.mentor_summary }}</p>
+        <h4>Full Narrative</h4>
+        <p id="full-narrative-text">{{ full_narrative }}</p>
     </article>
-    <article class="analysis-block">
-        <h4>Trend Interpretation</h4>
-        <p>{{ analysis.trend_analysis }}</p>
+    {% if full_narrative %}
+    <article class="analysis-block tts-panel">
+        <h4>Listen to This Interpretation</h4>
+        <p class="trend-meta">Change language to auto-translate the narrative and play in the selected voice.</p>
+        <div class="tts-controls">
+            <label for="tts-language">Language</label>
+            <select id="tts-language">
+                <option value="en-IN">English (India)</option>
+                <option value="en-US">English (US)</option>
+                <option value="hi-IN">Hindi</option>
+                <option value="ta-IN">Tamil</option>
+                <option value="te-IN">Telugu</option>
+                <option value="kn-IN">Kannada</option>
+                <option value="ml-IN">Malayalam</option>
+                <option value="bn-IN">Bengali</option>
+                <option value="mr-IN">Marathi</option>
+                <option value="gu-IN">Gujarati</option>
+                <option value="pa-IN">Punjabi</option>
+                <option value="ur-IN">Urdu</option>
+                <option value="es-ES">Spanish</option>
+                <option value="fr-FR">French</option>
+                <option value="de-DE">German</option>
+            </select>
+            <button type="button" class="btn-primary" id="tts-play">Play</button>
+            <button type="button" class="btn-quiet" id="tts-pause">Pause</button>
+            <button type="button" class="btn-quiet" id="tts-stop">Stop</button>
+        </div>
+        <p id="tts-status" class="trend-meta"></p>
     </article>
-    <article class="analysis-block">
-        <h4>Doctor Handoff Summary</h4>
-        <p>{{ analysis.doctor_summary }}</p>
-    </article>
-    {% if analysis.raw_response.doctor_suggestions_considered %}
-        <article class="analysis-block">
-            <h4>Doctor Suggestions Considered by AI</h4>
-            <ul class="notes-list">
-                {% for note in analysis.raw_response.doctor_suggestions_considered %}
-                    <li>{{ note }}</li>
-                {% endfor %}
-            </ul>
-        </article>
+    {{ full_narrative|json_script:"tts-narrative-text" }}
     {% endif %}
 </section>
 {% else %}
@@ -219,6 +232,232 @@
                 circle.setAttribute("r", idx === coords.length - 1 ? "3.6" : "2.2");
                 chart.appendChild(circle);
             });
+        });
+    })();
+
+    (function () {
+        const textNode = document.getElementById("tts-narrative-text");
+        const narrativeNode = document.getElementById("full-narrative-text");
+        const languageSelect = document.getElementById("tts-language");
+        const playBtn = document.getElementById("tts-play");
+        const pauseBtn = document.getElementById("tts-pause");
+        const stopBtn = document.getElementById("tts-stop");
+        const status = document.getElementById("tts-status");
+        if (!textNode || !narrativeNode || !languageSelect || !playBtn || !pauseBtn || !stopBtn || !status) return;
+        if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+            status.textContent = "Text-to-speech is not supported in this browser.";
+            playBtn.disabled = true;
+            pauseBtn.disabled = true;
+            stopBtn.disabled = true;
+            return;
+        }
+
+        let voices = [];
+        let utterance = null;
+        let activeSession = 0;
+        const originalNarrative = (JSON.parse(textNode.textContent) || "").trim();
+        let activeNarrative = originalNarrative;
+        const translationCache = { "en": originalNarrative };
+
+        const defaultLang = "{{ tts_default_lang|default:'en-IN'|escapejs }}";
+        if (defaultLang) {
+            const options = Array.from(languageSelect.options).map((opt) => opt.value);
+            if (options.includes(defaultLang)) {
+                languageSelect.value = defaultLang;
+            }
+        }
+
+        function loadVoices() {
+            voices = window.speechSynthesis.getVoices() || [];
+        }
+        loadVoices();
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+
+        function pickVoice(lang) {
+            const lower = (lang || "").toLowerCase();
+            const exact = voices.find((v) => (v.lang || "").toLowerCase() === lower);
+            if (exact) return exact;
+            const prefix = lower.split("-")[0];
+            return voices.find((v) => (v.lang || "").toLowerCase().startsWith(prefix)) || null;
+        }
+
+        function stopCurrent() {
+            activeSession += 1;
+            window.speechSynthesis.cancel();
+            utterance = null;
+        }
+
+        function getCookie(name) {
+            const cookieValue = document.cookie
+                .split(";")
+                .map((item) => item.trim())
+                .find((item) => item.startsWith(name + "="));
+            if (!cookieValue) return "";
+            return decodeURIComponent(cookieValue.split("=").slice(1).join("="));
+        }
+
+        function normalizeLang(code) {
+            return String(code || "en").toLowerCase().split("-")[0];
+        }
+
+        async function translateNarrative(langCode) {
+            const normalized = normalizeLang(langCode);
+            if (translationCache[normalized]) {
+                return translationCache[normalized];
+            }
+            status.textContent = "Translating narrative...";
+            const response = await fetch("{% url 'report-translate' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCookie("csrftoken"),
+                },
+                body: JSON.stringify({
+                    text: originalNarrative,
+                    source_lang: "en",
+                    target_lang: langCode,
+                }),
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || "Translation failed");
+            }
+            const translated = (payload.translated_text || "").trim() || originalNarrative;
+            translationCache[normalized] = translated;
+            return translated;
+        }
+
+        function splitForSpeech(text, maxLen) {
+            const source = String(text || "").replace(/\s+/g, " ").trim();
+            if (!source) return [];
+            const sentenceChunks = source.match(/[^.!?]+[.!?]*/g) || [source];
+            const result = [];
+            sentenceChunks.forEach((sentence) => {
+                const part = sentence.trim();
+                if (!part) return;
+                if (part.length <= maxLen) {
+                    result.push(part);
+                    return;
+                }
+                const words = part.split(" ");
+                let current = "";
+                words.forEach((word) => {
+                    const candidate = current ? (current + " " + word) : word;
+                    if (candidate.length > maxLen && current) {
+                        result.push(current);
+                        current = word;
+                    } else {
+                        current = candidate;
+                    }
+                });
+                if (current) result.push(current);
+            });
+            return result;
+        }
+
+        function pickFallbackVoice() {
+            return (
+                pickVoice("en-IN") ||
+                pickVoice("en-US") ||
+                voices.find((v) => (v.lang || "").toLowerCase().startsWith("en")) ||
+                null
+            );
+        }
+
+        function speakChunkSequence(text, lang) {
+            const sessionId = ++activeSession;
+            const chunks = splitForSpeech(text, 220);
+            if (!chunks.length) {
+                status.textContent = "No narrative available for playback.";
+                return;
+            }
+
+            const preferredVoice = pickVoice(lang);
+            const fallbackVoice = pickFallbackVoice();
+
+            function speakAt(index, useFallback) {
+                if (sessionId !== activeSession) return;
+                if (index >= chunks.length) {
+                    status.textContent = "Narration completed.";
+                    return;
+                }
+                const chunkText = chunks[index];
+                utterance = new SpeechSynthesisUtterance(chunkText);
+                utterance.lang = useFallback ? "en-IN" : (lang || "en-IN");
+                utterance.rate = 0.96;
+                utterance.pitch = 1;
+                if (useFallback && fallbackVoice) {
+                    utterance.voice = fallbackVoice;
+                } else if (preferredVoice) {
+                    utterance.voice = preferredVoice;
+                }
+                utterance.onstart = function () {
+                    if (sessionId !== activeSession) return;
+                    status.textContent = "Playing narration...";
+                };
+                utterance.onend = function () {
+                    speakAt(index + 1, useFallback);
+                };
+                utterance.onerror = function () {
+                    if (sessionId !== activeSession) return;
+                    if (!useFallback && fallbackVoice) {
+                        status.textContent = "Selected voice unavailable. Switching to fallback voice.";
+                        speakAt(index, true);
+                        return;
+                    }
+                    status.textContent = "Playback failed on this browser voice. Try another language.";
+                };
+                window.speechSynthesis.speak(utterance);
+            }
+
+            speakAt(0, false);
+        }
+
+        languageSelect.addEventListener("change", async function () {
+            const selected = languageSelect.value || "en-IN";
+            const normalized = normalizeLang(selected);
+            stopCurrent();
+            if (normalized === "en") {
+                activeNarrative = originalNarrative;
+                narrativeNode.textContent = activeNarrative;
+                status.textContent = "Showing original English narrative.";
+                return;
+            }
+            try {
+                const translatedText = await translateNarrative(selected);
+                activeNarrative = translatedText;
+                narrativeNode.textContent = activeNarrative;
+                status.textContent = "Narrative translated.";
+            } catch (error) {
+                activeNarrative = originalNarrative;
+                narrativeNode.textContent = activeNarrative;
+                status.textContent = "Translation failed. Showing original English text.";
+            }
+        });
+
+        playBtn.addEventListener("click", function () {
+            if (!activeNarrative) {
+                status.textContent = "No narrative available for playback.";
+                return;
+            }
+            stopCurrent();
+            const lang = languageSelect.value || "en-IN";
+            speakChunkSequence(activeNarrative, lang);
+        });
+
+        pauseBtn.addEventListener("click", function () {
+            if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+                window.speechSynthesis.pause();
+                status.textContent = "Narration paused.";
+            } else if (window.speechSynthesis.paused) {
+                window.speechSynthesis.resume();
+                status.textContent = "Narration resumed.";
+            }
+        });
+
+        stopBtn.addEventListener("click", function () {
+            stopCurrent();
+            status.textContent = "Narration stopped.";
         });
     })();
 </script>

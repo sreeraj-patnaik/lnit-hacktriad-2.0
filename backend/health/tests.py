@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.urls import reverse
+from unittest.mock import Mock, patch
 
 from .models import AnalysisResult, MedicalReport
 
@@ -87,3 +88,19 @@ class HealthFlowTests(TestCase):
         response = self.client.get(reverse("report-detail", args=[report.id]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Graphical Trend Analysis")
+
+    @patch("health.views.requests.get")
+    def test_translate_endpoint_returns_translated_text(self, mock_get):
+        self.client.login(username="u1", password="pass12345")
+        mock_response = Mock()
+        mock_response.json.return_value = [[["Hola", "Hello", None, None]]]
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        response = self.client.post(
+            reverse("report-translate"),
+            data='{"text":"Hello","source_lang":"en","target_lang":"es-ES"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("translated_text"), "Hola")

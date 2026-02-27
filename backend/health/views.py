@@ -1,8 +1,13 @@
+import json
+
+import requests
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.text import slugify
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from .forms import MedicalReportUploadForm
 from .models import MedicalReport
@@ -95,5 +100,72 @@ def report_detail_view(request, report_id: int):
             "parameters": report.parameters.all(),
             "analysis": getattr(report, "analysis", None),
             "trend_series": trend_series[:10],
+            "full_narrative": (
+                getattr(report, "analysis", None).raw_response.get("comprehensive_narrative", "")
+                if getattr(report, "analysis", None)
+                else ""
+            )
+            or (getattr(report, "analysis", None).mentor_summary if getattr(report, "analysis", None) else ""),
+            "tts_default_lang": (
+                getattr(getattr(request.user, "userprofile", None), "language_preference", "") or "en-IN"
+            ),
         },
     )
+
+
+@login_required
+@require_POST
+@csrf_exempt
+def translate_narrative_view(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+    text = str(payload.get("text") or "").strip()
+    target_lang = str(payload.get("target_lang") or "").strip()
+    if not text:
+        return JsonResponse({"error": "Text is required."}, status=400)
+    if not target_lang:
+        return JsonResponse({"error": "target_lang is required."}, status=400)
+
+    normalized_target = _normalize_translate_lang(target_lang)
+    normalized_source = _normalize_translate_lang(str(payload.get("source_lang") or "en"))
+
+    if normalized_target == normalized_source:
+        return JsonResponse({"translated_text": text, "target_lang": target_lang})
+
+    try:
+        response = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": normalized_source,
+                "tl": normalized_target,
+                "dt": "t",
+                "q": text,
+            },
+            timeout=12,
+        )
+        response.raise_for_status()
+        data = response.json()
+        translated = "".join(chunk[0] for chunk in data[0] if chunk and chunk[0])
+        if not translated.strip():
+            raise ValueError("Empty translation response")
+        return JsonResponse({"translated_text": translated, "target_lang": target_lang})
+    except Exception:
+        return JsonResponse(
+            {
+                "error": "Translation service is unavailable right now.",
+                "translated_text": text,
+                "target_lang": target_lang,
+            },
+            status=503,
+        )
+
+
+def _normalize_translate_lang(lang_code: str) -> str:
+    value = (lang_code or "en").strip().lower()
+    if not value:
+        return "en"
+    return value.split("-")[0]
