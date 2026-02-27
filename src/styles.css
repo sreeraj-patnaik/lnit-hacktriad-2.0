@@ -4,6 +4,7 @@ body {
   background: #f4f8fb;
 }
 
+
 /* Navbar */
 .navbar {
   display: flex;
@@ -11,6 +12,7 @@ body {
   padding: 20px 40px;
   background: linear-gradient(90deg, #38369a, #38369a);
   color: white;
+  align-items: center;
 }
 
 .navbar a {
@@ -127,9 +129,12 @@ textarea {
   margin-top: 15px;
   color: #555;
 }
-.title h1{
-  margin-right: 40px;
+.title {
+  margin-right: 910px;
+  padding: 0px;
+
 }
+
 
 .primary-btn {
   margin-top: 25px;
@@ -155,6 +160,7 @@ textarea {
   gap: 30px;
   max-width: 1200px;
   margin: auto;
+
 }
 
 .feature-card {
@@ -162,6 +168,7 @@ textarea {
   padding: 30px;
   border-radius: 16px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  margin-top: 10px;
 }
 
 /* RESPONSIVE */
@@ -179,8 +186,75 @@ textarea {
 .aimage {
   width: 70px;
   height: 69px;
+  margin-bottom: 10px;
 }
 .risk{
   width: 33px;
   height: 33px;
+}
+/* DESIGNED FOR SECTION */
+.designed-section {
+  background:  #f4f8fb;
+  padding: 100px 20px;
+  text-align: center;
+}
+
+.designed-title {
+  font-size: 48px;
+  color: #12171f;
+  margin-bottom: 60px;
+  opacity: 0.3;
+}
+
+.designed-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 25px;
+}
+
+.tag {
+  background: #e5e7eb;
+  padding: 16px 30px;
+  border-radius: 40px;
+  font-weight: 500;
+}
+
+/* FOOTER */
+.footer-section {
+  background: #0f172a;
+  color: #cbd5e1;
+  padding: 80px 40px 30px 40px;
+}
+
+.footer-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 60px;
+  max-width: 1200px;
+  margin: auto;
+}
+
+.footer-section h3 {
+  color: white;
+  margin-bottom: 15px;
+}
+
+.footer-section p {
+  line-height: 1.6;
+  color: #94a3b8;
+}
+
+.footer-bottom {
+  text-align: center;
+  margin-top: 60px;
+  font-size: 14px;
+  color: #64748b;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .footer-container {
+    grid-template-columns: 1fr;
+  }
 }

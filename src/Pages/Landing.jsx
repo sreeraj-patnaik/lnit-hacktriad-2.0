@@ -30,19 +30,21 @@ export default function Landing() {
           <div className="feature-card">
             <img className="risk" src={risk} />
             <h3>Risk Highlighting</h3>
-            <p>Visual red/yellow/green risk indicators.</p>
+            <p>Visual red/yellow/green risk indicators.
+
+            </p>
           </div>
 
           <div className="feature-card">
             <img className="risk" src={language} />
             <h3>Multilingual Support</h3>
-            <p>Explanations in regional languages.</p>
+            <p>Receive explanations in your preferred language for better understanding and accessibility.</p>
           </div>
 
           <div className="feature-card">
             <img className="risk" src={trend} />
             <h3>Trend Analysis</h3>
-            <p>Track improvement or worsening over time.</p>
+            <p>Compare reports over time to understand how your health markers are improving or changing.</p>
           </div>
 
           <div className="feature-card">
@@ -53,6 +55,46 @@ export default function Landing() {
 
         </div>
       </section>
+            {/* DESIGNED FOR SECTION */}
+      <section className="designed-section">
+        <h2 className="designed-title">Designed For</h2>
+
+        <div className="designed-tags">
+          <div className="tag">Patients with recurring lab tests</div>
+          <div className="tag">Individuals with low health literacy</div>
+          <div className="tag">Elderly users seeking clarity</div>
+          <div className="tag">Regional language speakers</div>
+        </div>
+      </section>
+
+      {/* DISCLAIMER SECTION */}
+      {/* FOOTER SECTION */}
+<footer className="footer-section">
+  <div className="footer-container">
+
+    <div className="footer-about">
+      <h3>About This Project</h3>
+      <p>
+        Context-Aware AI Health Trajectory Interpreter is a responsible AI
+        healthcare prototype designed to simplify complex medical reports,
+        highlight potential risks, and provide multilingual health insights.
+      </p>
+    </div>
+
+    <div className="footer-mission">
+      <h3>Our Mission</h3>
+      <p>
+        To make medical information understandable, accessible,
+        and actionable for everyone — without replacing professional care.
+      </p>
+    </div>
+
+  </div>
+
+  <div className="footer-bottom">
+    © 2026 AI Health Interpreter • Educational Prototype
+  </div>
+</footer>
     </>
   );
 }
