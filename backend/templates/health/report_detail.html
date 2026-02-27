@@ -244,17 +244,13 @@
         const stopBtn = document.getElementById("tts-stop");
         const status = document.getElementById("tts-status");
         if (!textNode || !narrativeNode || !languageSelect || !playBtn || !pauseBtn || !stopBtn || !status) return;
-        if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
-            status.textContent = "Text-to-speech is not supported in this browser.";
-            playBtn.disabled = true;
-            pauseBtn.disabled = true;
-            stopBtn.disabled = true;
-            return;
-        }
+        const browserSpeechSupported = ("speechSynthesis" in window) && ("SpeechSynthesisUtterance" in window);
 
         let voices = [];
         let utterance = null;
         let activeSession = 0;
+        const audioPlayer = new Audio();
+        let activeAudioUrl = "";
         const originalNarrative = (JSON.parse(textNode.textContent) || "").trim();
         let activeNarrative = originalNarrative;
         const translationCache = { "en": originalNarrative };
@@ -268,10 +264,16 @@
         }
 
         function loadVoices() {
+            if (!browserSpeechSupported) {
+                voices = [];
+                return;
+            }
             voices = window.speechSynthesis.getVoices() || [];
         }
         loadVoices();
-        window.speechSynthesis.onvoiceschanged = loadVoices;
+        if (browserSpeechSupported) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
 
         function pickVoice(lang) {
             const lower = (lang || "").toLowerCase();
@@ -283,8 +285,16 @@
 
         function stopCurrent() {
             activeSession += 1;
-            window.speechSynthesis.cancel();
+            if (browserSpeechSupported) {
+                window.speechSynthesis.cancel();
+            }
             utterance = null;
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            if (activeAudioUrl) {
+                URL.revokeObjectURL(activeAudioUrl);
+                activeAudioUrl = "";
+            }
         }
 
         function getCookie(name) {
@@ -325,6 +335,39 @@
             const translated = (payload.translated_text || "").trim() || originalNarrative;
             translationCache[normalized] = translated;
             return translated;
+        }
+
+        async function ensureNarrativeForLanguage(langCode) {
+            const normalized = normalizeLang(langCode);
+            if (normalized === "en") {
+                return originalNarrative;
+            }
+            return translateNarrative(langCode);
+        }
+
+        async function fetchServerTtsAudio(text, langCode) {
+            const response = await fetch("{% url 'report-tts' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCookie("csrftoken"),
+                },
+                body: JSON.stringify({
+                    text: text,
+                    target_lang: langCode,
+                }),
+            });
+            if (!response.ok) {
+                let detail = "TTS failed";
+                try {
+                    const payload = await response.json();
+                    detail = payload.error || detail;
+                } catch (e) {
+                    // ignore non-JSON error
+                }
+                throw new Error(detail);
+            }
+            return response.blob();
         }
 
         function splitForSpeech(text, maxLen) {
@@ -383,7 +426,10 @@
                 }
                 const chunkText = chunks[index];
                 utterance = new SpeechSynthesisUtterance(chunkText);
-                utterance.lang = useFallback ? "en-IN" : (lang || "en-IN");
+                const utteranceLang = useFallback
+                    ? ((fallbackVoice && fallbackVoice.lang) || "en-IN")
+                    : ((preferredVoice && preferredVoice.lang) || (lang || "en-IN"));
+                utterance.lang = utteranceLang;
                 utterance.rate = 0.96;
                 utterance.pitch = 1;
                 if (useFallback && fallbackVoice) {
@@ -435,21 +481,68 @@
             }
         });
 
-        playBtn.addEventListener("click", function () {
+        playBtn.addEventListener("click", async function () {
+            const lang = languageSelect.value || "en-IN";
+            const normalized = normalizeLang(lang);
+            try {
+                if (normalized !== "en") {
+                    activeNarrative = await ensureNarrativeForLanguage(lang);
+                    narrativeNode.textContent = activeNarrative;
+                } else {
+                    activeNarrative = originalNarrative;
+                    narrativeNode.textContent = activeNarrative;
+                }
+            } catch (error) {
+                activeNarrative = originalNarrative;
+                narrativeNode.textContent = activeNarrative;
+                status.textContent = "Translation failed. Playing original English text.";
+            }
             if (!activeNarrative) {
                 status.textContent = "No narrative available for playback.";
                 return;
             }
             stopCurrent();
-            const lang = languageSelect.value || "en-IN";
+            try {
+                status.textContent = "Preparing voice...";
+                const audioBlob = await fetchServerTtsAudio(activeNarrative, lang);
+                activeAudioUrl = URL.createObjectURL(audioBlob);
+                audioPlayer.src = activeAudioUrl;
+                audioPlayer.onended = function () {
+                    status.textContent = "Narration completed.";
+                };
+                await audioPlayer.play();
+                status.textContent = "Playing narration...";
+                return;
+            } catch (error) {
+                if (normalized !== "en") {
+                    status.textContent = "Server voice failed: " + (error.message || "TTS unavailable") + ". Browser fallback is disabled for non-English to avoid wrong accent.";
+                    return;
+                }
+                if (!browserSpeechSupported) {
+                    status.textContent = "Server voice failed and browser speech is not supported.";
+                    return;
+                }
+                status.textContent = "Server voice unavailable. Using browser voice fallback for English.";
+            }
+
             speakChunkSequence(activeNarrative, lang);
         });
 
         pauseBtn.addEventListener("click", function () {
-            if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+            if (!audioPlayer.paused && !audioPlayer.ended) {
+                audioPlayer.pause();
+                status.textContent = "Narration paused.";
+                return;
+            }
+            if (audioPlayer.paused && audioPlayer.currentTime > 0 && !audioPlayer.ended) {
+                audioPlayer.play();
+                status.textContent = "Narration resumed.";
+                return;
+            }
+            if (browserSpeechSupported && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
                 window.speechSynthesis.pause();
                 status.textContent = "Narration paused.";
-            } else if (window.speechSynthesis.paused) {
+            } else if (browserSpeechSupported && window.speechSynthesis.paused) {
                 window.speechSynthesis.resume();
                 status.textContent = "Narration resumed.";
             }

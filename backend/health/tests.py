@@ -5,6 +5,7 @@ from django.urls import reverse
 from unittest.mock import Mock, patch
 
 from .models import AnalysisResult, MedicalReport
+from .services import process_report
 
 
 class HealthFlowTests(TestCase):
@@ -104,3 +105,60 @@ class HealthFlowTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("translated_text"), "Hola")
+
+    @patch("health.views.asyncio.run")
+    def test_tts_endpoint_returns_audio(self, mock_asyncio_run):
+        self.client.login(username="u1", password="pass12345")
+        def _fake_run(coroutine):
+            coroutine.close()
+            return b"fake-mp3-bytes"
+
+        mock_asyncio_run.side_effect = _fake_run
+
+        response = self.client.post(
+            reverse("report-tts"),
+            data='{"text":"Namaskaram","target_lang":"te-IN"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "audio/mpeg")
+        self.assertTrue(response.content.startswith(b"fake-mp3"))
+
+    def test_tts_endpoint_rejects_empty_text(self):
+        self.client.login(username="u1", password="pass12345")
+        response = self.client.post(
+            reverse("report-tts"),
+            data='{"text":"","target_lang":"te-IN"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_input_guardrail_blocks_low_completeness_analysis(self):
+        report = MedicalReport.objects.create(
+            user=self.user1,
+            report_date="2026-02-26",
+            ocr_text="Hemoglobin 12.1",
+        )
+        process_report(report.id)
+        analysis = AnalysisResult.objects.get(report=report)
+        raw = analysis.raw_response or {}
+        self.assertIn("guardrail_meta", raw)
+        self.assertFalse(raw["guardrail_meta"]["input_guardrails"]["safe"])
+        self.assertIn("guardrails detected insufficient input quality", analysis.mentor_summary.lower())
+
+    def test_output_guardrail_meta_present_on_safe_input(self):
+        report = MedicalReport.objects.create(
+            user=self.user1,
+            report_date="2026-02-27",
+            ocr_text=(
+                "Hemoglobin 12.8 g/dL 12-16\n"
+                "WBC 6500 cells/uL 4000-11000\n"
+                "Platelets 220000 /uL 150000-450000"
+            ),
+        )
+        process_report(report.id)
+        analysis = AnalysisResult.objects.get(report=report)
+        raw = analysis.raw_response or {}
+        self.assertIn("guardrail_meta", raw)
+        self.assertTrue(raw["guardrail_meta"]["input_guardrails"]["safe"])
+        self.assertIn(raw["guardrail_meta"].get("confidence"), ["HIGH", "MEDIUM", "LOW"])

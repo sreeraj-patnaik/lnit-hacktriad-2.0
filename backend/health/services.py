@@ -9,12 +9,14 @@ from django.conf import settings
 from django.db import transaction
 
 from core.models import UserProfile
+from .guardrails import run_input_guardrails, run_output_guardrails
 from .models import AnalysisResult, LabParameter, MedicalReport
 
 
 def process_report(report_id: int) -> AnalysisResult:
     report = MedicalReport.objects.select_related("user").get(id=report_id)
     extracted_data, doctor_suggestions = run_ocr(report)
+    input_guardrail_result = run_input_guardrails(report=report, extracted_data=extracted_data)
 
     with transaction.atomic():
         report.parameters.all().delete()
@@ -32,7 +34,21 @@ def process_report(report_id: int) -> AnalysisResult:
         report.save(update_fields=["doctor_suggestions"])
 
         context = prepare_llm_context(report)
-        result = generate_analysis(context)
+        lab_parameters = list(report.parameters.values("name", "value", "unit", "ref_min", "ref_max", "risk_flag"))
+        if input_guardrail_result.get("safe"):
+            ai_result = generate_analysis(context)
+            result = run_output_guardrails(
+                ai_output=ai_result,
+                parameters=lab_parameters,
+                input_confidence=input_guardrail_result.get("confidence", 0.0),
+            )
+        else:
+            result = _build_input_guardrail_blocked_analysis(context, input_guardrail_result)
+
+        result["guardrail_meta"] = {
+            **(result.get("guardrail_meta") or {}),
+            "input_guardrails": input_guardrail_result,
+        }
         analysis, _ = AnalysisResult.objects.update_or_create(
             report=report,
             defaults={
@@ -679,3 +695,24 @@ def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:
     if value > ref_max:
         return "high"
     return "normal"
+
+
+def _build_input_guardrail_blocked_analysis(context: dict, input_guardrail_result: dict) -> dict:
+    fallback = fallback_analysis(context)
+    reason = input_guardrail_result.get("reason") or "Input quality checks did not pass."
+    safe_text = (
+        "We could not generate a full AI interpretation because guardrails detected insufficient input quality. "
+        f"{reason} "
+        "Please upload a clearer report image or provide structured text lines (name, value, unit, range), then retry."
+    )
+    return {
+        "comprehensive_narrative": safe_text,
+        "mentor_summary": safe_text,
+        "trend_analysis": "Trend analysis is limited until input quality improves.",
+        "doctor_summary": fallback.get("doctor_summary", ""),
+        "doctor_suggestions_considered": fallback.get("doctor_suggestions_considered", []),
+        "guardrail_meta": {
+            "output_guardrails_skipped": True,
+            "confidence": "LOW",
+        },
+    }
