@@ -4,36 +4,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}AI Report analyser & Health Trajectory Interpreter{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'app.css' %}">
+    <title>{% block title %}ClarioRx{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'app.css' %}?v=enterprise-20260228-1">
 </head>
 <body class="{% block page_class %}{% endblock %}">
-<div class="app-shell">
-    <header class="topbar">
-        <div class="brand-wrap">
-            <a class="brand-mark" href="{% url 'dashboard' %}">AH</a>
-            <div>
-                <p class="brand-title">AI Report analyser & Health Trajectory Interpreter</p>
-                <p class="brand-subtitle">Longitudinal Lab Intelligence</p>
-            </div>
-        </div>
-        <nav class="top-nav">
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-orb orb-a" aria-hidden="true"></div>
+<div class="bg-orb orb-b" aria-hidden="true"></div>
+
+<div class="site-shell">
+    <header class="site-header">
+        <a class="brand" href="{% url 'dashboard' %}">
+            <span class="brand-logo">CR</span>
+            <span class="brand-copy">
+                <strong>ClarioRx</strong>
+                <small>Report Intelligence</small>
+            </span>
+        </a>
+
+        <button class="nav-toggle" type="button" aria-label="Toggle navigation" data-nav-toggle>
+            <span></span><span></span><span></span>
+        </button>
+
+        <nav class="main-nav" data-main-nav>
             {% if request.user.is_authenticated %}
                 <a href="{% url 'dashboard' %}">Dashboard</a>
+                <a href="{% url 'report-upload' %}">Upload</a>
                 <a href="{% url 'profile' %}">Profile</a>
-                <a href="{% url 'report-upload' %}">Upload Scan</a>
                 <form method="post" action="{% url 'logout' %}" class="logout-form">
                     {% csrf_token %}
-                    <button type="submit">Logout</button>
+                    <button type="submit" class="btn btn-outline">Logout</button>
                 </form>
             {% else %}
-                <a href="{% url 'login' %}">Login</a>
-                <a href="{% url 'signup' %}">Sign Up</a>
+                <a href="{% url 'dashboard' %}#features">Features</a>
+                <a href="{% url 'dashboard' %}#workflow">Workflow</a>
+                <a href="{% url 'dashboard' %}#faq">FAQ</a>
+                <a href="{% url 'login' %}" class="btn btn-outline">Login</a>
+                <a href="{% url 'signup' %}" class="btn btn-primary">Get Started</a>
             {% endif %}
         </nav>
     </header>
 
-    <main class="page-wrap">
+    <main class="page-main">
         {% if messages %}
             <section class="messages">
                 {% for message in messages %}
@@ -43,6 +58,22 @@
         {% endif %}
         {% block content %}{% endblock %}
     </main>
+
+    <footer class="site-footer">
+        <p>Patient-friendly insights with clinician-ready signal quality.</p>
+    </footer>
 </div>
+
+<script>
+    (function () {
+        const toggle = document.querySelector("[data-nav-toggle]");
+        const nav = document.querySelector("[data-main-nav]");
+        if (!toggle || !nav) return;
+        toggle.addEventListener("click", function () {
+            nav.classList.toggle("open");
+        });
+    })();
+</script>
 </body>
 </html>
+

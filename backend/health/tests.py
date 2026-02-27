@@ -133,7 +133,7 @@ class HealthFlowTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_input_guardrail_blocks_low_completeness_analysis(self):
+    def test_input_guardrail_allows_low_completeness_with_warning(self):
         report = MedicalReport.objects.create(
             user=self.user1,
             report_date="2026-02-26",
@@ -144,7 +144,8 @@ class HealthFlowTests(TestCase):
         raw = analysis.raw_response or {}
         self.assertIn("guardrail_meta", raw)
         self.assertFalse(raw["guardrail_meta"]["input_guardrails"]["safe"])
-        self.assertIn("guardrails detected insufficient input quality", analysis.mentor_summary.lower())
+        self.assertTrue(raw["guardrail_meta"].get("input_quality_degraded"))
+        self.assertIn("limited confidence", analysis.mentor_summary.lower())
 
     def test_output_guardrail_meta_present_on_safe_input(self):
         report = MedicalReport.objects.create(

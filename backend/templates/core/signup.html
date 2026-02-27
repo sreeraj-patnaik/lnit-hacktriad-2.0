@@ -1,29 +1,38 @@
 {% extends "base.html" %}
-{% block title %}Sign Up | Aarogya Health Command{% endblock %}
+{% block title %}Create Account | Aarogya Health Command{% endblock %}
 {% block content %}
-<section class="panel">
-    <div class="panel-head">
-        <h1>Create Account</h1>
-        <p>Set up your health profile once so every new report gets deeper and more personalized interpretation.</p>
-    </div>
-    <form method="post" class="app-form grid-two">
-        {% csrf_token %}
-        {% for field in form %}
-            <div class="form-field {% if field.errors %}error{% endif %}">
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {% if field.help_text %}
-                    <small>{{ field.help_text }}</small>
-                {% endif %}
-                {% for error in field.errors %}
-                    <small class="field-error">{{ error }}</small>
-                {% endfor %}
-            </div>
-        {% endfor %}
-        <div class="form-actions span-two">
-            <button type="submit" class="btn-primary">Create Account</button>
+<section class="auth-layout">
+    <article class="panel">
+        <div class="panel-head">
+            <p class="kicker">Onboarding</p>
+            <h1>Create your account</h1>
+            <p>Register once, then upload reports and track trends over time.</p>
         </div>
-    </form>
-    <p class="auth-switch">Already have an account? <a href="{% url 'login' %}">Login</a></p>
+        <form method="post" class="app-form grid-two">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="form-field {% if field.errors %}error{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                    {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+                </div>
+            {% endfor %}
+            <div class="form-actions span-two"><button type="submit" class="btn btn-primary">Create Account</button></div>
+        </form>
+        <p class="auth-switch">Already registered? <a href="{% url 'login' %}">Login</a></p>
+    </article>
+
+    <aside class="panel auth-side">
+        <div class="panel-head">
+            <h3>Why This Platform</h3>
+            <p>Built for hackathon-grade demo quality and production-like UX.</p>
+        </div>
+        <ul class="action-list">
+            <li>Upload scan or text line data.</li>
+            <li>Get narrative plus trend visualization.</li>
+            <li>Use translated TTS for accessibility.</li>
+        </ul>
+    </aside>
 </section>
 {% endblock %}

@@ -1,24 +1,80 @@
 {% extends "base.html" %}
-{% block title %}Login | Aarogya Health Command{% endblock %}
+{% block title %}Sign In | Aarogya Health Command{% endblock %}
 {% block content %}
-<section class="panel auth-panel">
-    <div class="panel-head">
-        <h1>Sign In</h1>
-        <p>Access your reports, profile context, and trend analysis dashboard.</p>
-    </div>
-    <form method="post" class="app-form">
-        {% csrf_token %}
-        {% for field in form %}
-            <div class="form-field {% if field.errors %}error{% endif %}">
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {% for error in field.errors %}
-                    <small class="field-error">{{ error }}</small>
-                {% endfor %}
+<section class="auth-layout">
+    <article class="panel auth-panel">
+        {% if otp_stage %}
+            <div class="panel-head">
+                <p class="kicker">Step 2 of 2</p>
+                <h1>Verify OTP</h1>
+                <p>Enter the 6-digit code sent to {{ otp_email }}.</p>
             </div>
-        {% endfor %}
-        <button type="submit" class="btn-primary">Login</button>
-    </form>
-    <p class="auth-switch">New here? <a href="{% url 'signup' %}">Create account</a></p>
+            <form method="post" class="app-form">
+                {% csrf_token %}
+                <input type="hidden" name="step" value="otp">
+                {% if otp_form.non_field_errors %}
+                    {% for error in otp_form.non_field_errors %}
+                        <small class="field-error">{{ error }}</small>
+                    {% endfor %}
+                {% endif %}
+                {% for field in otp_form %}
+                    <div class="form-field {% if field.errors %}error{% endif %}">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                        {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+                    </div>
+                {% endfor %}
+                <button type="submit" class="btn btn-primary">Verify OTP</button>
+            </form>
+            <div class="cta-row">
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="step" value="resend">
+                    <button type="submit" class="btn btn-outline">Resend OTP</button>
+                </form>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="step" value="reset">
+                    <button type="submit" class="btn btn-outline">Use Another Account</button>
+                </form>
+            </div>
+        {% else %}
+            <div class="panel-head">
+                <p class="kicker">Secure Sign In</p>
+                <h1>Access your health intelligence workspace</h1>
+            </div>
+            <form method="post" class="app-form">
+                {% csrf_token %}
+                <input type="hidden" name="step" value="credentials">
+                {% if form.non_field_errors %}
+                    {% for error in form.non_field_errors %}
+                        <small class="field-error">{{ error }}</small>
+                    {% endfor %}
+                {% endif %}
+                {% for field in form %}
+                    <div class="form-field {% if field.errors %}error{% endif %}">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+                    </div>
+                {% endfor %}
+                <button type="submit" class="btn btn-primary">Send OTP</button>
+            </form>
+            <p class="auth-switch">New user? <a href="{% url 'signup' %}">Create account</a></p>
+        {% endif %}
+    </article>
+
+    <aside class="panel auth-side">
+        <div class="panel-head">
+            <h3>After Login</h3>
+            <p>Everything stays exactly integrated as before.</p>
+        </div>
+        <ul class="action-list">
+            <li>Unified timeline of all uploads and extracted markers.</li>
+            <li>Guardrail-aware interpretations with confidence cues.</li>
+            <li>Graphical trends and multilingual narrative playback.</li>
+        </ul>
+    </aside>
 </section>
 {% endblock %}

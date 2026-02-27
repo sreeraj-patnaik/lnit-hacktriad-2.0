@@ -1,26 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Profile | Aarogya Health Command{% endblock %}
 {% block content %}
-<section class="panel narrow">
+<section class="panel wide-panel">
     <div class="panel-head">
-        <h1>Your Health Profile</h1>
-        <p>Keep this updated to improve context-aware analysis quality and trend interpretation.</p>
+        <p class="kicker">Patient Context</p>
+        <h1>Profile Settings</h1>
+        <p>These fields are used to personalize narratives and trend interpretation.</p>
     </div>
-    <form method="post" class="app-form">
+    <form method="post" class="app-form grid-two">
         {% csrf_token %}
         {% for field in form %}
             <div class="form-field {% if field.errors %}error{% endif %}">
                 <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                 {{ field }}
-                {% if field.help_text %}
-                    <small>{{ field.help_text }}</small>
-                {% endif %}
-                {% for error in field.errors %}
-                    <small class="field-error">{{ error }}</small>
-                {% endfor %}
+                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
             </div>
         {% endfor %}
-        <button type="submit" class="btn-primary">Save Profile</button>
+        <div class="form-actions span-two"><button type="submit" class="btn btn-primary">Save Profile</button></div>
     </form>
 </section>
 {% endblock %}

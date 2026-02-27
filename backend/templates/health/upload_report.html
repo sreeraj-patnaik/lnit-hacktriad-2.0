@@ -1,28 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Upload Report | Aarogya Health Command{% endblock %}
 {% block content %}
-<section class="panel narrow">
+<section class="panel wide-panel">
     <div class="panel-head">
-        <h1>Upload Current Scan / Report</h1>
-        <p>
-            Your file and text are analyzed against previous scans, profile context, and doctor notes to produce a more complete interpretation.
-        </p>
+        <p class="kicker">Ingestion Center</p>
+        <h1>Upload or paste report data</h1>
+        <p>Use clear scans or structured text to maximize extraction coverage and interpretation quality.</p>
     </div>
-    <form method="post" enctype="multipart/form-data" class="app-form">
+    <form method="post" enctype="multipart/form-data" class="app-form grid-two">
         {% csrf_token %}
         {% for field in form %}
-            <div class="form-field {% if field.errors %}error{% endif %}">
+            <div class="form-field {% if field.errors %}error{% endif %} {% if field.name == 'ocr_text' %}span-two{% endif %}">
                 <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                 {{ field }}
-                {% if field.help_text %}
-                    <small>{{ field.help_text }}</small>
-                {% endif %}
-                {% for error in field.errors %}
-                    <small class="field-error">{{ error }}</small>
-                {% endfor %}
+                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
             </div>
         {% endfor %}
-        <button type="submit" class="btn-primary">Upload and Analyze</button>
+        <div class="form-actions span-two"><button type="submit" class="btn btn-primary">Upload and Analyze</button></div>
     </form>
 </section>
 {% endblock %}

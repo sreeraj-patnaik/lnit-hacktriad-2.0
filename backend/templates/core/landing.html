@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}AI Health Report Platform | Aarogya Health Command{% endblock %}
+{% block page_class %}landing-page{% endblock %}
+{% block content %}
+<section class="hero-shell">
+    <div>
+        <p class="kicker">Enterprise Health Analytics</p>
+        <h1>From noisy lab reports to clear clinical intelligence.</h1>
+        <p class="lead">Upload scans or structured text, extract biomarkers, monitor trajectories, and generate safe patient explanations with doctor handoff summaries.</p>
+        <div class="cta-row">
+            <a href="{% url 'signup' %}" class="btn btn-primary">Create Account</a>
+            <a href="{% url 'login' %}" class="btn btn-outline">Sign In</a>
+        </div>
+    </div>
+    <aside class="hero-stat">
+        <h3>Platform Scope</h3>
+        <ul class="metric-list">
+            <li><span>Input modes</span><strong>Image + Text</strong></li>
+            <li><span>Interpretation</span><strong>Narrative + Trends</strong></li>
+            <li><span>Doctor summary</span><strong>Structured Handoff</strong></li>
+            <li><span>Voice mode</span><strong>Multilingual TTS</strong></li>
+        </ul>
+    </aside>
+</section>
+
+<section id="features" class="feature-grid">
+    <article class="feature-card"><h3>Context-Driven Narrative</h3><p>Uses profile context and timeline data to explain what matters, not just raw values.</p></article>
+    <article class="feature-card"><h3>Longitudinal Trend Cards</h3><p>Visual marker movement with risk-state context across past and present reports.</p></article>
+    <article class="feature-card"><h3>Guardrail-Aware Reliability</h3><p>Quality controls are enforced while degraded-confidence outputs remain available.</p></article>
+    <article class="feature-card"><h3>Clinical Communication</h3><p>Condenses findings into doctor-facing summaries and report-note extraction.</p></article>
+</section>
+
+<section id="workflow" class="panel workflow-panel">
+    <div class="panel-head">
+        <h2>Operational Workflow</h2>
+        <p>Fast onboarding and repeatable interpretation across every new report upload.</p>
+    </div>
+    <div class="step-grid">
+        <article><span>1</span><p>Create account and set patient context.</p></article>
+        <article><span>2</span><p>Upload report file or paste text lines.</p></article>
+        <article><span>3</span><p>Review extracted markers and risk labels.</p></article>
+        <article><span>4</span><p>Consume narrative and multilingual voice output.</p></article>
+    </div>
+</section>
+
+<section id="faq" class="panel faq-panel">
+    <div class="panel-head"><h2>FAQ</h2></div>
+    <details open><summary>Can I use text-only report entry?</summary><p>Yes. You can submit structured parameter lines without uploading a file.</p></details>
+    <details><summary>Does this replace medical advice?</summary><p>No. This system is for education and doctor discussion support, not diagnosis.</p></details>
+    <details><summary>Is translation and TTS available?</summary><p>Yes. You can translate the narrative and listen in multiple languages.</p></details>
+</section>
+{% endblock %}

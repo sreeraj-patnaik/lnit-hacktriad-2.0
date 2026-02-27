@@ -76,6 +76,22 @@ class LoginForm(AuthenticationForm):
     username = forms.CharField(max_length=150)
 
 
+class LoginOTPForm(forms.Form):
+    otp = forms.CharField(
+        max_length=6,
+        min_length=6,
+        label="One-Time Password (OTP)",
+        help_text="Enter the 6-digit code sent to your registered email.",
+        widget=forms.TextInput(
+            attrs={
+                "inputmode": "numeric",
+                "autocomplete": "one-time-code",
+                "placeholder": "123456",
+            }
+        ),
+    )
+
+
 class UserProfileForm(forms.ModelForm):
     class Meta:
         model = UserProfile

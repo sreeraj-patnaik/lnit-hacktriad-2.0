@@ -1,30 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Report Detail | Aarogya Health Command{% endblock %}
 {% block content %}
-<section class="hero-card report-hero">
+<section class="hero-shell">
     <div>
-        <p class="eyebrow">Report Detail</p>
-        <h1>Scan from {{ report.report_date }}</h1>
-        <p class="hero-copy">
+        <p class="kicker">Report Intelligence View</p>
+        <h1>Clinical report from {{ report.report_date }}</h1>
+        <p class="lead">
             Parameter extraction, trend interpretation, and doctor-style narrative are combined below.
         </p>
     </div>
-    <div class="patient-chip">
-        <p><strong>Source:</strong>
-            {% if report.report_file %}
-                <a href="{{ report.report_file.url }}" target="_blank">Open uploaded file</a>
-            {% else %}
-                Text input mode
-            {% endif %}
-        </p>
-        <p><strong>Analysis:</strong>
-            {% if report.analysis_completed %}
-                <span class="tag success">Completed</span>
-            {% else %}
-                <span class="tag neutral">Pending</span>
-            {% endif %}
-        </p>
-    </div>
+    <aside class="hero-stat">
+        <h3>Report Metadata</h3>
+        <ul class="metric-list">
+            <li>
+                <span>Source</span>
+                <strong>{% if report.report_file %}<a href="{{ report.report_file.url }}" target="_blank">Uploaded File</a>{% else %}Text input{% endif %}</strong>
+            </li>
+            <li>
+                <span>Analysis</span>
+                <strong>{% if report.analysis_completed %}<span class="tag success">Completed</span>{% else %}<span class="tag neutral">Pending</span>{% endif %}</strong>
+            </li>
+        </ul>
+    </aside>
 </section>
 
 <section class="panel">
@@ -158,9 +155,9 @@
                 <option value="fr-FR">French</option>
                 <option value="de-DE">German</option>
             </select>
-            <button type="button" class="btn-primary" id="tts-play">Play</button>
-            <button type="button" class="btn-quiet" id="tts-pause">Pause</button>
-            <button type="button" class="btn-quiet" id="tts-stop">Stop</button>
+            <button type="button" class="btn btn-primary" id="tts-play">Play</button>
+            <button type="button" class="btn btn-outline" id="tts-pause">Pause</button>
+            <button type="button" class="btn btn-outline" id="tts-stop">Stop</button>
         </div>
         <p id="tts-status" class="trend-meta"></p>
     </article>

@@ -35,15 +35,14 @@ def process_report(report_id: int) -> AnalysisResult:
 
         context = prepare_llm_context(report)
         lab_parameters = list(report.parameters.values("name", "value", "unit", "ref_min", "ref_max", "risk_flag"))
-        if input_guardrail_result.get("safe"):
-            ai_result = generate_analysis(context)
-            result = run_output_guardrails(
-                ai_output=ai_result,
-                parameters=lab_parameters,
-                input_confidence=input_guardrail_result.get("confidence", 0.0),
-            )
-        else:
-            result = _build_input_guardrail_blocked_analysis(context, input_guardrail_result)
+        ai_result = generate_analysis(context)
+        result = run_output_guardrails(
+            ai_output=ai_result,
+            parameters=lab_parameters,
+            input_confidence=input_guardrail_result.get("confidence", 0.0),
+        )
+        if not input_guardrail_result.get("safe"):
+            result = _apply_input_quality_notice(result, input_guardrail_result)
 
         result["guardrail_meta"] = {
             **(result.get("guardrail_meta") or {}),
@@ -697,22 +696,20 @@ def classify(value: float, ref_min: float | None, ref_max: float | None) -> str:
     return "normal"
 
 
-def _build_input_guardrail_blocked_analysis(context: dict, input_guardrail_result: dict) -> dict:
-    fallback = fallback_analysis(context)
+def _apply_input_quality_notice(result: dict, input_guardrail_result: dict) -> dict:
+    updated = dict(result or {})
     reason = input_guardrail_result.get("reason") or "Input quality checks did not pass."
-    safe_text = (
-        "We could not generate a full AI interpretation because guardrails detected insufficient input quality. "
+    notice = (
+        "Interpretation generated with limited confidence because input quality checks flagged missing or unclear fields. "
         f"{reason} "
-        "Please upload a clearer report image or provide structured text lines (name, value, unit, range), then retry."
+        "Improve value/unit/reference-range completeness for a stronger interpretation."
     )
-    return {
-        "comprehensive_narrative": safe_text,
-        "mentor_summary": safe_text,
-        "trend_analysis": "Trend analysis is limited until input quality improves.",
-        "doctor_summary": fallback.get("doctor_summary", ""),
-        "doctor_suggestions_considered": fallback.get("doctor_suggestions_considered", []),
-        "guardrail_meta": {
-            "output_guardrails_skipped": True,
-            "confidence": "LOW",
-        },
-    }
+
+    for field in ("comprehensive_narrative", "mentor_summary", "trend_analysis"):
+        existing = str(updated.get(field, "") or "").strip()
+        updated[field] = f"{notice} {existing}".strip()
+
+    guardrail_meta = dict(updated.get("guardrail_meta") or {})
+    guardrail_meta["input_quality_degraded"] = True
+    updated["guardrail_meta"] = guardrail_meta
+    return updated
