@@ -10,7 +10,7 @@ export default function Landing() {
     <>
       {/* HERO SECTION */}
       <section className="hero-section">
-        <h1>Context-Aware AI Health Trajectory Interpreter</h1>
+        <h1>AI Report Analyser & Health Trajectory Interpreter</h1>
         <p>
           Understand your medical reports clearly with safe, responsible AI insights.
         </p>

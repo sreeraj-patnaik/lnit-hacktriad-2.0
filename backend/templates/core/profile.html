@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Your Health Profile</h2>
+<p>Fill this once and keep updating to improve context-aware analysis.</p>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Save Profile</button>
+</form>
+{% endblock %}

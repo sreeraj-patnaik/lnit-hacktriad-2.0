@@ -1,0 +1,11 @@
+body {
+    background: linear-gradient(135deg, #f7f9fc 0%, #eef4ff 100%);
+}
+
+table {
+    width: 100%;
+}
+
+.message.success {
+    border-left: 4px solid #2e7d32;
+}

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Trajectory MVP</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="container">
+    <nav>
+        <ul>
+            <li><strong>Health Trajectory MVP</strong></li>
+        </ul>
+        <ul>
+            {% if request.user.is_authenticated %}
+                <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+                <li><a href="{% url 'profile' %}">Profile</a></li>
+                <li><a href="{% url 'report-upload' %}">Upload Report</a></li>
+                <li>
+                    <form method="post" action="{% url 'logout' %}" style="margin:0;">
+                        {% csrf_token %}
+                        <button type="submit" class="secondary">Logout</button>
+                    </form>
+                </li>
+            {% else %}
+                <li><a href="{% url 'login' %}">Login</a></li>
+                <li><a href="{% url 'signup' %}">Sign Up</a></li>
+            {% endif %}
+        </ul>
+    </nav>
+
+    {% if messages %}
+        {% for message in messages %}
+            <article class="message {{ message.tags }}">{{ message }}</article>
+        {% endfor %}
+    {% endif %}
+
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -5,7 +5,7 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <img className="aimage" src={ai} />
-      <h2 className="title" >AI Health Interpreter</h2>
+      <h2 className="title" >InsightRx</h2>
       <div>
         <Link to="/">Home</Link>
         <Link to="/analyze">Analyze</Link>
