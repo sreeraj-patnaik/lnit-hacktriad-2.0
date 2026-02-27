@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Report Details</h2>
+<p><strong>Date:</strong> {{ report.report_date }}</p>
+<p>
+    <strong>File:</strong>
+    {% if report.report_file %}
+        <a href="{{ report.report_file.url }}" target="_blank">Open report file</a>
+    {% else %}
+        No file uploaded (text input mode)
+    {% endif %}
+</p>
+
+{% if report.ocr_text %}
+<h3>Input/OCR Text</h3>
+<pre>{{ report.ocr_text }}</pre>
+{% endif %}
+
+<h3>Extracted Lab Parameters</h3>
+{% if parameters %}
+    <table>
+        <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Value</th>
+            <th>Reference Range</th>
+            <th>Risk</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for p in parameters %}
+            <tr>
+                <td>{{ p.name }}</td>
+                <td>{{ p.value }} {{ p.unit }}</td>
+                <td>{{ p.ref_min }} - {{ p.ref_max }}</td>
+                <td>{{ p.risk_flag }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>No parameters extracted.</p>
+{% endif %}
+
+<h3>LLM Mentor Output</h3>
+{% if analysis %}
+    <article>
+        <h4>Present Condition Summary</h4>
+        <p>{{ analysis.mentor_summary }}</p>
+    </article>
+    <article>
+        <h4>Trends</h4>
+        <p>{{ analysis.trend_analysis }}</p>
+    </article>
+    <article>
+        <h4>Doctor Handoff Summary</h4>
+        <p>{{ analysis.doctor_summary }}</p>
+    </article>
+{% else %}
+    <p>Analysis not available yet.</p>
+{% endif %}
+{% endblock %}
